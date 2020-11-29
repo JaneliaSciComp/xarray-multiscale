@@ -1,0 +1,11 @@
+README.rst
+setup.py
+src/xarray_multiscale/__init__.py
+src/xarray_multiscale/multiscale.py
+src/xarray_multiscale/reducers.py
+src/xarray_multiscale/storage.py
+src/xarray_multiscale.egg-info/PKG-INFO
+src/xarray_multiscale.egg-info/SOURCES.txt
+src/xarray_multiscale.egg-info/dependency_links.txt
+src/xarray_multiscale.egg-info/requires.txt
+src/xarray_multiscale.egg-info/top_level.txt
