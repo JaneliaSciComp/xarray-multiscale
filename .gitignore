@@ -4,6 +4,7 @@
 *.egg
 !/tests/**/*.egg
 /*.egg-info
+*.egg-info/
 /dist/*
 build
 _build
