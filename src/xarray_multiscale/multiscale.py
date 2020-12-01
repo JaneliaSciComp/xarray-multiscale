@@ -274,11 +274,8 @@ def get_downsampled_offset(scale_factors: Sequence[int]) -> Any:
     """
     For a given number of dimensions and a sequence of downscale factors, calculate the starting offset of the downscaled
     array in the units of the full-resolution data.
-    """
-    ndim = len(scale_factors)
-    return np.mgrid[tuple(slice(scale_factors[dim]) for dim in range(ndim))].mean(
-        tuple(range(1, 1 + ndim))
-    )
+    """   
+    return np.array([np.arange(s).mean() for s in scale_factors])
 
 
 def downscale_slice(sl: slice, scale: int) -> slice:
@@ -307,7 +304,7 @@ def slice_span(sl: slice) -> int:
 
 
 def blocked_pyramid(
-    arr, block_size: Sequence, scale_factors: Sequence = (2, 2, 2), **kwargs
+    arr, block_size: Sequence, scale_factors: Sequence[int] = (2, 2, 2), **kwargs
 ):
     full_pyr = multiscale(arr, scale_factors=scale_factors, **kwargs)
     slices = slices_from_chunks(normalize_chunks(block_size, arr.shape))
