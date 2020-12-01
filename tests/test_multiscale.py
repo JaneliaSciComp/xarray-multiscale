@@ -9,6 +9,7 @@ def test_downscale_depth():
     assert get_downscale_depth((4,4,4), (2,2,2)) == 2
     assert get_downscale_depth((4,2,2), (2,2,2)) == 2
 
+
 def test_even_padding():
     sizes = (10, 11, 12, 13)
     scale = 2
@@ -76,9 +77,11 @@ def test_multiscale():
 
     assert [p.shape for p in pyr_padded] == [shape, (5,5,5), (3,3,3), (2,2,2), (1,1,1)]
     assert [p.shape for p in pyr_trimmed] == [shape, (4,4,4), (2,2,2), (1,1,1)]
-    
+
+    # check that the first multiscale array is identical to the input data    
     assert np.array_equal(pyr_padded[0].data.compute(), array)
     assert np.array_equal(pyr_trimmed[0].data.compute(), array)
 
+    assert np.array_equal(pyr_trimmed[-2].data.mean().compute(), pyr_trimmed[-1].data.compute().mean())
     assert np.allclose(pyr_padded[0].data.mean().compute(), .17146776406035666)
 
