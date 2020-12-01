@@ -6,6 +6,7 @@ from scipy.interpolate import interp1d
 from dask.array.core import slices_from_chunks, normalize_chunks
 from dask.array import coarsen
 
+
 def multiscale(
     array: Any,
     reduction: Callable[[Any], Any],
@@ -22,7 +23,7 @@ def multiscale(
 
     reduction: a function that aggregates data over windows.
 
-    scale_factors: an iterable of integers that specifies how much to downscale each axis of the array. 
+    scale_factors: an iterable of integers that specifies how much to downscale each axis of the array.
 
     pad_mode: How (or if) the input should be padded. When set to `None` the input will be trimmed as needed.
 
@@ -30,7 +31,7 @@ def multiscale(
     the reduction function accepts a "dtype" kwarg, e.g. numpy.mean(x, dtype='int').
 
     Returns a list of DataArrays, one per level of downscaling. These DataArrays have `coords` properties that track the changing offset (if any)
-    induced by the downsampling operation. Additionally, the scale factors are stored each DataArray's attrs propery under the key `scale_factors` 
+    induced by the downsampling operation. Additionally, the scale factors are stored each DataArray's attrs propery under the key `scale_factors`
     -------
 
     """
@@ -45,18 +46,22 @@ def multiscale(
         padded_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
     else:
         padded_shape = prepad(array, scale_factors, pad_mode=pad_mode).shape
-    
+
     # figure out the maximum depth
     levels = range(0, 1 + get_downscale_depth(padded_shape, scale_factors))
-    scales: Tuple[Tuple[int]] = tuple(tuple(s ** l for s in scale_factors) for l in levels)
+    scales: Tuple[Tuple[int]] = tuple(
+        tuple(s ** l for s in scale_factors) for l in levels
+    )
     result = [_ingest_array(array, scales[0])]
     data = result[0].data
     base_attrs = result[0].attrs
     base_coords = result[0].coords
 
-    for scale in scales[1:]:        
-        downscaled = downscale(data, reduction, scale, pad_mode=pad_mode, preserve_dtype=preserve_dtype)
-        
+    for scale in scales[1:]:
+        downscaled = downscale(
+            data, reduction, scale, pad_mode=pad_mode, preserve_dtype=preserve_dtype
+        )
+
         # hideous
         new_coords = tuple(
             DataArray(
@@ -99,18 +104,18 @@ def _ingest_array(array: Any, scales: Sequence[int]):
         attrs = {}
 
     result = DataArray(
-            data=data,
-            coords=coords,
-            dims=dims,
-            attrs=attrs,
-        )
+        data=data,
+        coords=coords,
+        dims=dims,
+        attrs=attrs,
+    )
     return result
 
 
 def even_padding(length: int, window: int) -> int:
     """
     Compute how much to add to `length` such that the resulting value is evenly divisible by `window`.
-    
+
     Parameters
     ----------
     length : int
@@ -158,11 +163,11 @@ def prepad(
     -------
 
     """
-    
+
     if pad_mode == None:
         # no op
         return array
-    
+
     pw = tuple(
         (0, even_padding(ax, scale)) for ax, scale in zip(array.shape, scale_factors)
     )
@@ -205,7 +210,7 @@ def downscale(
     scale_factors: Sequence[int],
     pad_mode: Optional[str] = None,
     preserve_dtype: bool = True,
-    **kwargs
+    **kwargs,
 ) -> DataArray:
     """
     Downscale an array using windowed aggregation. This function is a light wrapper for `dask.array.coarsen`.
@@ -213,13 +218,13 @@ def downscale(
     Parameters
     ----------
     array: The narray to be downscaled.
-    
-    reduction: The function to apply to each window of the array.
-    
-    scale_factors: A list if ints specifying how much to downscale the array per dimension.    
 
-    trim_excess: A boolean that determines whether the size of the input array should be increased or decreased such that 
-    each scale factor tiles its respective array axis. Defaults to False, which will result in the input being padded.  
+    reduction: The function to apply to each window of the array.
+
+    scale_factors: A list if ints specifying how much to downscale the array per dimension.
+
+    trim_excess: A boolean that determines whether the size of the input array should be increased or decreased such that
+    each scale factor tiles its respective array axis. Defaults to False, which will result in the input being padded.
 
     **kwargs: extra kwargs passed to dask.array.coarsen
 
@@ -233,28 +238,33 @@ def downscale(
     to_coarsen = prepad(da.asarray(array), scale_factors, pad_mode=pad_mode)
 
     coarsened = coarsen(
-        reduction, to_coarsen, {d: s for d, s in enumerate(scale_factors)}, trim_excess=trim_excess, **kwargs)
+        reduction,
+        to_coarsen,
+        {d: s for d, s in enumerate(scale_factors)},
+        trim_excess=trim_excess,
+        **kwargs,
+    )
 
-    if preserve_dtype: 
+    if preserve_dtype:
         coarsened = coarsened.astype(array.dtype)
 
     return coarsened
 
 
-def get_downscale_depth(
-    shape: Tuple[int], scale_factors: Sequence[int]
-) -> int:
+def get_downscale_depth(shape: Tuple[int], scale_factors: Sequence[int]) -> int:
     """
     For an array and a sequence of scale factors, calculate the maximum possible number of downscaling operations.
     If `scale_factors` is uniformly less than 1, this function returns 0.
     """
     if len(shape) != len(scale_factors):
-        raise ValueError(f'Shape (length == {len(shape)} ) and scale factors (length == {len(scale_factors)}) do not align.')
-    
-    _scale_factors: Any = np.array(scale_factors).astype('int')
-    _shape: Any = np.array(shape).astype('int')
-    
-    # If any of the scale factors are greater than the respective shape, return 0 
+        raise ValueError(
+            f"Shape (length == {len(shape)} ) and scale factors (length == {len(scale_factors)}) do not align."
+        )
+
+    _scale_factors: Any = np.array(scale_factors).astype("int")
+    _shape: Any = np.array(shape).astype("int")
+
+    # If any of the scale factors are greater than the respective shape, return 0
     if np.any((_scale_factors - shape) > 0):
         result = 0
 
@@ -274,7 +284,7 @@ def get_downsampled_offset(scale_factors: Sequence[int]) -> Any:
     """
     For a given number of dimensions and a sequence of downscale factors, calculate the starting offset of the downscaled
     array in the units of the full-resolution data.
-    """   
+    """
     return np.array([np.arange(s).mean() for s in scale_factors])
 
 
