@@ -26,15 +26,15 @@ which returns this (a collection of DataArrays, each with decreasing size):
 .. code-block:: python
 
     [<xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 4)>
-dask.array<array, shape=(4,), dtype=int64, chunksize=(4,), chunktype=numpy.ndarray>
-Coordinates:
-  * dim_0    (dim_0) float32 0.0 1.0 2.0 3.0, <xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 2)>
-dask.array<astype, shape=(2,), dtype=int64, chunksize=(2,), chunktype=numpy.ndarray>
-Coordinates:
-  * dim_0    (dim_0) float64 0.5 2.5, <xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 1)>
-dask.array<astype, shape=(1,), dtype=int64, chunksize=(1,), chunktype=numpy.ndarray>
-Coordinates:
-  * dim_0    (dim_0) float64 1.5]
+    dask.array<array, shape=(4,), dtype=int64, chunksize=(4,), chunktype=numpy.ndarray>
+    Coordinates:
+    * dim_0    (dim_0) float32 0.0 1.0 2.0 3.0, <xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 2)>
+    dask.array<astype, shape=(2,), dtype=int64, chunksize=(2,), chunktype=numpy.ndarray>
+    Coordinates:
+    * dim_0    (dim_0) float64 0.5 2.5, <xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 1)>
+    dask.array<astype, shape=(1,), dtype=int64, chunksize=(1,), chunktype=numpy.ndarray>
+    Coordinates:
+    * dim_0    (dim_0) float64 1.5]
 
 
 Generate a lazy multiscale representation of an ``xarray.DataArray``:
