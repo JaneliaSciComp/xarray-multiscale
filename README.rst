@@ -19,8 +19,13 @@ Generate a lazy multiscale representation of a numpy array:
     import numpy as np
 
     data = np.arange(16)
-    multi = multiscale(data, np.mean, (2,))
-    # returns [<xarray.DataArray 'array-fed9c25b7cfa8573affc06d4f0df54d8' (dim_0: 16)>
+    multiscale(data, np.mean, (2,))
+
+which returns this (a collection of DataArrays, each with decreasing size): 
+
+.. code-block:: python
+
+    [<xarray.DataArray 'array-fed9c25b7cfa8573affc06d4f0df54d8' (dim_0: 16)>
     dask.array<array, shape=(16,), dtype=int64, chunksize=(16,), chunktype=numpy.ndarray>
     Coordinates:
     * dim_0    (dim_0) float32 0.0 1.0 2.0 3.0 4.0 ... 11.0 12.0 13.0 14.0 15.0, <xarray.DataArray 'array-fed9c25b7cfa8573affc06d4f0df54d8' (dim_0: 8)>
@@ -51,8 +56,12 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
               DataArray(np.arange(data.shape[0]), dims=('x',), attrs={'units' : 'm'}))
 
     dataarray = DataArray(data, coords)
-    multi = multiscale(dataarray, np.mean, (2,2))
-    # returns 
+    multiscale(dataarray, np.mean, (2,2))
+
+which returns this:
+
+.. code-block:: python
+
     [<xarray.DataArray 'array-8220a22a04dfac25908da40f77214fe3' (y: 4, x: 4)>
     dask.array<array, shape=(4, 4), dtype=int64, chunksize=(4, 4), chunktype=numpy.ndarray>
     Coordinates:
@@ -66,7 +75,7 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
     Coordinates:
     * y        (y) float64 1.5
     * x        (x) float64 1.5]
-    
+
 Caveats / alternatives
 **********************
 tbd
