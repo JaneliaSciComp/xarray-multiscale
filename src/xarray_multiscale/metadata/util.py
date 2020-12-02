@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Sequence, Union, Dict, Any, Optional
 from xarray import DataArray
 from dacite import from_dict
@@ -13,7 +13,12 @@ def infer_c_or_f_contiguous(array: Any) -> str:
         return data_order
 
 @dataclass
-class SpatialTransform:
+class BaseMeta:    
+    def asdict(self):
+        return asdict(self)
+
+@dataclass
+class SpatialTransform(BaseMeta):
     axes: Sequence[str]
     units: Sequence[Union[str, None]]
     translate: Sequence[float]

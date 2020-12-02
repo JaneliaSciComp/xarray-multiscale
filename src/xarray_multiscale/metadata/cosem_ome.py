@@ -1,22 +1,22 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Sequence
 from xarray import DataArray
-from .util import SpatialTransform
+from .util import BaseMeta, SpatialTransform
 from typing import Optional
 
 @dataclass
-class ScaleMeta:
+class ScaleMeta(BaseMeta):
     path: str 
     transform: SpatialTransform
 
 
 @dataclass
-class MultiscaleMeta:
+class MultiscaleMeta(BaseMeta):
     datasets: Sequence[ScaleMeta]
 
 
 @dataclass
-class GroupMeta:
+class GroupMeta(BaseMeta):
     name: str
     multiscales: Sequence[MultiscaleMeta]
 
@@ -26,12 +26,13 @@ class GroupMeta:
         multiscales = [MultiscaleMeta(datasets=[ScaleMeta(path=path, transform=SpatialTransform.fromDataArray(arr)) for path, arr in zip(paths, dataarrays)])]
         return cls(name=name, multiscales=multiscales)
 
+
 @dataclass
-class ArrayMeta:
+class ArrayMeta(BaseMeta):
     name: Optional[str]
     transform: SpatialTransform
 
     @classmethod
     def fromDataArray(cls, data: DataArray) -> "ArrayMeta":
-        return cls(str(data.name), SpatialTransform.fromDataArray(data))
+        return cls(name=str(data.name), transform=SpatialTransform.fromDataArray(data))
         

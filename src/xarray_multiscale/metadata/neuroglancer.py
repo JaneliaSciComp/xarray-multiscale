@@ -4,19 +4,19 @@ from dataclasses import dataclass
 from xarray.core.dataarray import DataArray
 from typing import Union, List
 import numpy as np
-from xarray_multiscale.metadata.util import SpatialTransform
+from xarray_multiscale.metadata.util import BaseMeta, SpatialTransform
 
 @dataclass
-class PixelResolution:
+class PixelResolution(BaseMeta):
     # fortran-ordered
     dimensions: Sequence[float]
-    unit: str
+    unit: Union[str, None]
 
 
 @dataclass
-class GroupMeta:
+class GroupMeta(BaseMeta):
     # see https://github.com/google/neuroglancer/issues/176#issuecomment-553027775
-    # all are fortran-ordered
+    # these properties must be stored in the opposite order of C-contiguous axis indexing 
     axes: Sequence[Union[str, None]]
     units: Sequence[Union[str, None]]
     scales: Sequence[Sequence[int]]

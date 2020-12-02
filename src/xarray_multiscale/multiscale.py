@@ -80,6 +80,7 @@ def multiscale(
                 data=downscaled,
                 coords=new_coords,
                 attrs=base_attrs,
+                name=result[0].name
             )
         )
     return result
@@ -94,13 +95,15 @@ def _ingest_array(array: Any, scales: Sequence[int]):
         # ensure that key order matches dimension order
         coords = {d: array.coords[d] for d in dims}
         attrs = array.attrs
+        name = array.name
     else:
         data = da.asarray(array)
-        dims = tuple(map(str, range(data.ndim)))
+        dims = tuple(f'dim_{d}' for d in range(data.ndim))
         coords = {
             dim: DataArray(offset + np.arange(s, dtype="float32"), dims=dim)
             for dim, s, offset in zip(dims, array.shape, get_downsampled_offset(scales))
         }
+        name = None
         attrs = {}
 
     result = DataArray(
@@ -108,6 +111,7 @@ def _ingest_array(array: Any, scales: Sequence[int]):
         coords=coords,
         dims=dims,
         attrs=attrs,
+        name=name
     )
     return result
 
