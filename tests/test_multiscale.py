@@ -91,9 +91,8 @@ def test_multiscale():
         (5, 5, 5),
         (3, 3, 3),
         (2, 2, 2),
-        (1, 1, 1),
     ]
-    assert [p.shape for p in pyr_trimmed] == [shape, (4, 4, 4), (2, 2, 2), (1, 1, 1)]
+    assert [p.shape for p in pyr_trimmed] == [shape, (4, 4, 4), (2, 2, 2)]
 
     # check that the first multiscale array is identical to the input data
     assert np.array_equal(pyr_padded[0].data.compute(), array)

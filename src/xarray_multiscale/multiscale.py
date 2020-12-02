@@ -48,7 +48,7 @@ def multiscale(
         padded_shape = prepad(array, scale_factors, pad_mode=pad_mode).shape
 
     # figure out the maximum depth
-    levels = range(0, 1 + get_downscale_depth(padded_shape, scale_factors))
+    levels = range(0, get_downscale_depth(padded_shape, scale_factors))
     scales: Tuple[Tuple[int]] = tuple(
         tuple(s ** l for s in scale_factors) for l in levels
     )
