@@ -84,6 +84,17 @@ cython = ["cython"]
 
 [[package]]
 category = "main"
+description = "Simple creation of data classes from dictionaries."
+name = "dacite"
+optional = false
+python-versions = ">=3.6"
+version = "1.6.0"
+
+[package.extras]
+dev = ["pytest (>=5)", "pytest-cov", "coveralls", "black", "mypy", "pylint"]
+
+[[package]]
+category = "main"
 description = "Parallel PyData with Task Scheduling"
 name = "dask"
 optional = false
@@ -335,7 +346,7 @@ pandas = ">=0.25"
 setuptools = ">=38.4"
 
 [metadata]
-content-hash = "78c693c887752290df60e5fff35126a9f909188ad04cdb9dc51d20043f2e7a2f"
+content-hash = "2b16ba02053ac60fb2cbdc44cbdee76175eae726156ac1c158b786d068b532f3"
 lock-version = "1.0"
 python-versions = "^3.8"
 
@@ -365,6 +376,10 @@ colorama = [
 ]
 cytoolz = [
     {file = "cytoolz-0.11.0.tar.gz", hash = "sha256:c64f3590c3eb40e1548f0d3c6b2ccde70493d0b8dc6cc7f9f3fec0bb3dcd4222"},
+]
+dacite = [
+    {file = "dacite-1.6.0-py3-none-any.whl", hash = "sha256:4331535f7aabb505c732fa4c3c094313fc0a1d5ea19907bf4726a7819a68b93f"},
+    {file = "dacite-1.6.0.tar.gz", hash = "sha256:d48125ed0a0352d3de9f493bf980038088f45f3f9d7498f090b50a847daaa6df"},
 ]
 dask = [
     {file = "dask-2.30.0-py3-none-any.whl", hash = "sha256:4c215aa55951f570b5a294b2ce964ed801c6efd766231c53447460e60f73ea14"},
