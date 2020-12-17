@@ -8,6 +8,11 @@ Motivation
 **********
 Many image processing applications benefit from representing images at multiple scales (also known as `image pyramids <https://en.wikipedia.org/wiki/Pyramid_(image_processing)>`_). This package provides tools for generating lazy multiscale representations of N-dimensional data using `dask <https://dask.org/>`_ and `xarray <http://xarray.pydata.org/en/stable/>`_. Dask is used to create a lazy representation of the image downscaling process, and xarray is used to ensure that the downscaled images have the correct axis coordinates.
 
+Implementation
+**************
+At the moment, this package generates an image pyramid by using the ``dask.array.coarsen`` (`docs <https://docs.dask.org/en/latest/array-api.html#dask.array.coarsen>`_) to apply a reducing function to contiguous, non-overlapping chunks of the input data. With this implementation, it is not possible to generate a "Gaussian" image pyramid (i.e., a sequence of images that are recursively smoothed with a Gaussian filter and then resampled) because this exceeds the capabilities of ``dask.array.coarsen``. Gaussian pyramid support might be added in the future.
+
+
 Usage
 *****
 
