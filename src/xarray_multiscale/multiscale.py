@@ -258,7 +258,8 @@ def downscale(
 def get_downscale_depth(shape: Tuple[int], scale_factors: Sequence[int]) -> int:
     """
     For an array and a sequence of scale factors, calculate the maximum possible number of downscaling operations.
-    If `scale_factors` is uniformly less than 1, this function returns 0.
+    If any element of `scale_factors` is greater than the corresponding shape, this function returns 0.
+    If all `scale factors` are 1, this function returns 0.
     """
     if len(shape) != len(scale_factors):
         raise ValueError(
@@ -269,11 +270,10 @@ def get_downscale_depth(shape: Tuple[int], scale_factors: Sequence[int]) -> int:
     _shape: Any = np.array(shape).astype("int")
 
     # If any of the scale factors are greater than the respective shape, return 0
-    if np.any((_scale_factors - shape) > 0):
+    if np.less(shape, _scale_factors).any():
         result = 0
-
     # If all scale factors are 1, return 0
-    if np.all(_scale_factors == 1):
+    elif np.all(_scale_factors == 1):
         result = 0
     else:
         depths = {}

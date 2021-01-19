@@ -13,6 +13,7 @@ from xarray import DataArray
 def test_downscale_depth():
     assert get_downscale_depth((1,), (1,)) == 0
     assert get_downscale_depth((2, 2, 2), (2, 2, 2)) == 1
+    assert get_downscale_depth((1, 2, 2), (2, 2, 2)) == 0
     assert get_downscale_depth((4, 4, 4), (2, 2, 2)) == 2
     assert get_downscale_depth((4, 2, 2), (2, 2, 2)) == 2
 
