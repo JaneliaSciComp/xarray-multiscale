@@ -26,7 +26,7 @@ class GroupMeta(BaseMeta):
     def fromDataArraySequence(cls, dataarrays: Sequence[DataArray]) -> "GroupMeta":
         transforms = [SpatialTransform.fromDataArray(array, reverse_axes=True) for array in dataarrays]
         pixelresolution = PixelResolution(transforms[0].scale, transforms[0].units[0])
-        scales: List[List[int]] = [np.divide(t.scale, transforms[0].scale).astype('int').tolist() for t in transforms]
+        scales: List[List[int]] = [np.ceil(np.divide(t.scale, transforms[0].scale)).astype('int').tolist() for t in transforms]
         return cls(transforms[0].axes, transforms[0].units, scales, pixelresolution)
         
 
