@@ -1,7 +1,7 @@
 import numpy as np
 import dask.array as da
 from xarray import DataArray
-from typing import Any, List, Optional, Tuple, Union, Sequence, Callable
+from typing import Any, List, Optional, Tuple, Union, Sequence, Callable, Dict
 from scipy.interpolate import interp1d
 from dask.array.core import slices_from_chunks, normalize_chunks
 from dask.array import coarsen
@@ -13,6 +13,7 @@ def multiscale(
     scale_factors: Union[Sequence[int], int],
     pad_mode: Optional[str] = None,
     preserve_dtype: bool = True,
+    chunks=Optional[Union[Sequence[int], Dict[str, int]]]
 ) -> List[DataArray]:
     """
     Lazily generate a multiscale representation of an array
@@ -29,6 +30,8 @@ def multiscale(
 
     preserve_dtype: boolean, defaults to True, determines whether lower levels of the pyramid are coerced to the same dtype as the input. This assumes that
     the reduction function accepts a "dtype" kwarg, e.g. numpy.mean(x, dtype='int').
+
+    chunks: Sequence or Dict of ints, defaults to None. If `chunks` is supplied, all DataArrays are rechunked with these chunks before being returned.
 
     Returns a list of DataArrays, one per level of downscaling. These DataArrays have `coords` properties that track the changing offset (if any)
     induced by the downsampling operation. Additionally, the scale factors are stored each DataArray's attrs propery under the key `scale_factors`
@@ -83,6 +86,8 @@ def multiscale(
                 name=result[0].name
             )
         )
+    if chunks is not None: 
+        result = [r.chunk(chunks) for r in result]
     return result
 
 
