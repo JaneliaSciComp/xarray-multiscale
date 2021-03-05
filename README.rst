@@ -4,6 +4,12 @@ xarray-multiscale
 
 Simple tools for creating multiscale representations of large images.
 
+Installation
+************
+.. code-block:: bash
+
+    pip install xarray-multiscale
+
 Motivation
 **********
 Many image processing applications benefit from representing images at multiple scales (also known as `image pyramids <https://en.wikipedia.org/wiki/Pyramid_(image_processing)>`_). This package provides tools for generating lazy multiscale representations of N-dimensional data using `dask <https://dask.org/>`_ and `xarray <http://xarray.pydata.org/en/stable/>`_. Dask is used to create a lazy representation of the image downscaling process, and xarray is used to ensure that the downscaled images have the correct axis coordinates.
@@ -76,6 +82,14 @@ which returns this:
     * x        (x) float64 1.5]
 
 ``xarray_multiscale`` contains functionality for generating metadata required for the visualization tool neuroglancer (demo tbd) 
+
+Development
+***********
+
+This project is devloped using `poetry <https://python-poetry.org/>`_. After cloning this repo locally, run :code:`poetry install` to install local dependencies. For development within a conda environment, create a conda environment with :code:`poetry`, then install dependencies, e.g. :code:`conda create -n xarray-multiscale poetry -c conda-forge`, then run :code:`poetry install` in the root directory of this repo to install dependencies.
+
+Tests are rudimentary and use :code:`pytest`.
+
 
 Caveats / alternatives
 **********************
