@@ -52,17 +52,18 @@ def test_SpatialTransform():
                                          scale=[10.0, 1.0, 1.0 ] )
 
 def test_neuroglancer_metadata():
-    coords = [DataArray(np.arange(16), dims=('z'), attrs={'units': 'nm'}), 
-          DataArray(np.arange(16) + 5, dims=('y',), attrs={'units': 'm'}), 
-          DataArray(10 + (np.arange(16) * 10), dims=('x',), attrs={'units': 'km'})]
+    coords = [DataArray(np.arange(16) + .5, dims=('z'), attrs={'units': 'nm'}), 
+          DataArray(np.arange(16) + 1/3, dims=('y',), attrs={'units': 'm'}), 
+          DataArray(10 + (np.arange(16) * 100.1), dims=('x',), attrs={'units': 'km'})]
 
     data = DataArray(np.zeros((16, 16, 16)), coords=coords)
-    multi = multiscale(data, np.mean, (2,2,2))[:2]
+    multi = multiscale(data, np.mean, (2,2,2))[:4]
     neuroglancer_metadata = neuroglancer.GroupMeta.fromDataArraySequence(multi)
+    
     assert neuroglancer_metadata == neuroglancer.GroupMeta(axes=['x','y','z'],
                                                             units=['km','m','nm'],
-                                                            scales=[[1,1,1], [2,2,2]],
-                                                            pixelResolution=neuroglancer.PixelResolution(dimensions=[10.0, 1.0, 1.0], unit='km'))
+                                                            scales=[[1,1,1], [2,2,2], [4,4,4], [8,8,8]],
+                                                            pixelResolution=neuroglancer.PixelResolution(dimensions=[100.1, 1.0, 1.0], unit='km'))
 
 def test_cosem_ome():
     coords = [DataArray(np.arange(16), dims=('z'), attrs={'units': 'nm'}), 
