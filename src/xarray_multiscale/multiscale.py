@@ -13,7 +13,8 @@ def multiscale(
     scale_factors: Union[Sequence[int], int],
     pad_mode: Optional[str] = None,
     preserve_dtype: bool = True,
-    chunks: Optional[Union[Sequence[int], Dict[str, int]]] = None) -> List[DataArray]:
+    chunks: Optional[Union[Sequence[int], Dict[str, int]]] = None,
+) -> List[DataArray]:
     """
     Lazily generate a multiscale representation of an array
 
@@ -37,7 +38,7 @@ def multiscale(
     -------
 
     """
-    needs_padding = pad_mode!=None
+    needs_padding = pad_mode != None
     if isinstance(scale_factors, int):
         scale_factors = (scale_factors,) * array.ndim
     else:
@@ -51,7 +52,9 @@ def multiscale(
         padded_shape = prepad(array, scale_factors, pad_mode=pad_mode).shape
 
     # figure out the maximum depth
-    levels = range(0, 1 + get_downscale_depth(padded_shape, scale_factors, pad=needs_padding))
+    levels = range(
+        0, 1 + get_downscale_depth(padded_shape, scale_factors, pad=needs_padding)
+    )
     scales: Tuple[Tuple[int]] = tuple(
         tuple(s ** l for s in scale_factors) for l in levels
     )
@@ -83,12 +86,12 @@ def multiscale(
                 data=downscaled,
                 coords=new_coords,
                 attrs=base_attrs,
-                name=result[0].name
+                name=result[0].name,
             )
         )
     if chunks is not None:
         if isinstance(chunks, Sequence):
-            _chunks =  {k: v for k, v in zip(result[0].dims, chunks)}
+            _chunks = {k: v for k, v in zip(result[0].dims, chunks)}
         else:
             _chunks = chunks
         result = [r.chunk(_chunks) for r in result]
@@ -107,7 +110,7 @@ def _ingest_array(array: Any, scales: Sequence[int]):
         name = array.name
     else:
         data = da.asarray(array)
-        dims = tuple(f'dim_{d}' for d in range(data.ndim))
+        dims = tuple(f"dim_{d}" for d in range(data.ndim))
         coords = {
             dim: DataArray(offset + np.arange(s, dtype="float32"), dims=dim)
             for dim, s, offset in zip(dims, array.shape, get_downsampled_offset(scales))
@@ -115,13 +118,7 @@ def _ingest_array(array: Any, scales: Sequence[int]):
         name = None
         attrs = {}
 
-    result = DataArray(
-        data=data,
-        coords=coords,
-        dims=dims,
-        attrs=attrs,
-        name=name
-    )
+    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
     return result
 
 
@@ -264,7 +261,9 @@ def downscale(
     return coarsened
 
 
-def get_downscale_depth(shape: Tuple[int, ...], scale_factors: Sequence[int], pad=False) -> int:
+def get_downscale_depth(
+    shape: Tuple[int, ...], scale_factors: Sequence[int], pad=False
+) -> int:
     """
     For an array and a sequence of scale factors, calculate the maximum possible number of downscaling operations.
     If any element of `scale_factors` is greater than the corresponding shape, this function returns 0.
@@ -283,9 +282,9 @@ def get_downscale_depth(shape: Tuple[int, ...], scale_factors: Sequence[int], pa
         result = 0
     else:
         if pad:
-            depths = np.ceil(logn(shape, scale_factors)).astype('int')
+            depths = np.ceil(logn(shape, scale_factors)).astype("int")
         else:
-            depths = np.floor(logn(shape, scale_factors)).astype('int')
+            depths = np.floor(logn(shape, scale_factors)).astype("int")
         result = max(depths)
     return result
 
