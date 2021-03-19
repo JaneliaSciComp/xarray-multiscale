@@ -13,8 +13,7 @@ def multiscale(
     scale_factors: Union[Sequence[int], int],
     pad_mode: Optional[str] = None,
     preserve_dtype: bool = True,
-    chunks=Optional[Union[Sequence[int], Dict[str, int]]]
-) -> List[DataArray]:
+    chunks: Optional[Union[Sequence[int], Dict[str, int]]] = None) -> List[DataArray]:
     """
     Lazily generate a multiscale representation of an array
 
@@ -38,6 +37,7 @@ def multiscale(
     -------
 
     """
+    needs_padding = pad_mode!=None
     if isinstance(scale_factors, int):
         scale_factors = (scale_factors,) * array.ndim
     else:
@@ -51,7 +51,7 @@ def multiscale(
         padded_shape = prepad(array, scale_factors, pad_mode=pad_mode).shape
 
     # figure out the maximum depth
-    levels = range(0, get_downscale_depth(padded_shape, scale_factors))
+    levels = range(0, 1 + get_downscale_depth(padded_shape, scale_factors, pad=needs_padding))
     scales: Tuple[Tuple[int]] = tuple(
         tuple(s ** l for s in scale_factors) for l in levels
     )
@@ -86,8 +86,12 @@ def multiscale(
                 name=result[0].name
             )
         )
-    if chunks is not None: 
-        result = [r.chunk(chunks) for r in result]
+    if chunks is not None:
+        if isinstance(chunks, Sequence):
+            _chunks =  {k: v for k, v in zip(result[0].dims, chunks)}
+        else:
+            _chunks = chunks
+        result = [r.chunk(_chunks) for r in result]
     return result
 
 
@@ -260,7 +264,7 @@ def downscale(
     return coarsened
 
 
-def get_downscale_depth(shape: Tuple[int], scale_factors: Sequence[int]) -> int:
+def get_downscale_depth(shape: Tuple[int, ...], scale_factors: Sequence[int], pad=False) -> int:
     """
     For an array and a sequence of scale factors, calculate the maximum possible number of downscaling operations.
     If any element of `scale_factors` is greater than the corresponding shape, this function returns 0.
@@ -271,21 +275,18 @@ def get_downscale_depth(shape: Tuple[int], scale_factors: Sequence[int]) -> int:
             f"Shape (length == {len(shape)} ) and scale factors (length == {len(scale_factors)}) do not align."
         )
 
-    _scale_factors: Any = np.array(scale_factors).astype("int")
-    _shape: Any = np.array(shape).astype("int")
-
-    # If any of the scale factors are greater than the respective shape, return 0
-    if np.less(shape, _scale_factors).any():
+    _scale_factors = np.array(scale_factors).astype("int")
+    _shape = np.array(shape).astype("int")
+    if np.all(_scale_factors == 1):
         result = 0
-    # If all scale factors are 1, return 0
-    elif np.all(_scale_factors == 1):
+    elif np.any(_scale_factors > _shape):
         result = 0
     else:
-        depths = {}
-        for ax, s in enumerate(_scale_factors):
-            if s > 1:
-                depths[ax] = np.ceil(logn(shape[ax], s)).astype("int")
-        result = max(depths.values())
+        if pad:
+            depths = np.ceil(logn(shape, scale_factors)).astype('int')
+        else:
+            depths = np.floor(logn(shape, scale_factors)).astype('int')
+        result = max(depths)
     return result
 
 
