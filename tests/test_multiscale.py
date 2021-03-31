@@ -16,11 +16,12 @@ def test_downscale_depth():
     assert get_downscale_depth((2, 2, 2), (2, 2, 2)) == 1
     assert get_downscale_depth((1, 2, 2), (2, 2, 2)) == 0
     assert get_downscale_depth((4, 4, 4), (2, 2, 2)) == 2
-    assert get_downscale_depth((4, 2, 2), (2, 2, 2)) == 2
-    assert get_downscale_depth((5, 2, 2), (2, 2, 2)) == 2
-    assert get_downscale_depth((5, 2, 2), (2, 2, 2), pad=True) == 3
-    assert get_downscale_depth((7, 2, 2), (2, 2, 2)) == 2
-    assert get_downscale_depth((7, 2, 2), (2, 2, 2), pad=True) == 3
+    assert get_downscale_depth((4, 2, 2), (2, 2, 2)) == 1
+    assert get_downscale_depth((5, 2, 2), (2, 2, 2)) == 1
+    assert get_downscale_depth((5, 3, 3), (2, 2, 2), pad=True) == 2
+    assert get_downscale_depth((7, 2, 2), (2, 2, 2)) == 1
+    assert get_downscale_depth((7, 3, 3), (2, 2, 2), pad=True) == 2
+    assert get_downscale_depth((1500, 5495, 5200), (2, 2, 2)) == 10
 
 @pytest.mark.parametrize(("size","scale"), ((10,2), (11,2), (12,2), (13,2)))
 def test_even_padding(size: int, scale: int) -> None:

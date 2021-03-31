@@ -284,8 +284,9 @@ def get_downscale_depth(
         if pad:
             depths = np.ceil(logn(shape, scale_factors)).astype("int")
         else:
+            lg = logn(shape, scale_factors)
             depths = np.floor(logn(shape, scale_factors)).astype("int")
-        result = max(depths)
+        result = min(depths)
     return result
 
 
