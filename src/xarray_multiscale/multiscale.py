@@ -64,14 +64,18 @@ def multiscale(
         tuple(s ** l for s in scale_factors) for l in levels
     )
     result = [_ingest_array(array, scales[0])]
-    base_attrs = result[0].attrs
-    base_coords = result[0].coords
 
-    for scale in scales[1:]:
-        downscaled = downscale(
-            result[0], reduction, scale, pad_mode=pad_mode, preserve_dtype=preserve_dtype
-        )
+    for level in levels[1:]:
+        if recursive:
+            scale = scale_factors
+            downscaled = downscale(result[-1], reduction, scale, pad_mode=pad_mode) 
+        else:
+            scale = scales[level]
+            downscaled = downscale(result[0], reduction, scale, pad_mode=pad_mode)
         result.append(downscaled)
+
+    if preserve_dtype:
+        result = [r.astype(array.dtype) for r in result]
 
     if chunks is not None:
         if isinstance(chunks, Sequence):
@@ -79,6 +83,7 @@ def multiscale(
         else:
             _chunks = chunks
         result = [r.chunk(_chunks) for r in result]
+
     return result
 
 
@@ -202,7 +207,6 @@ def downscale(
     reduction: Callable,
     scale_factors: Sequence[int],
     pad_mode: Optional[str] = None,
-    preserve_dtype: bool = True,
     **kwargs,
 ) -> DataArray:
     """
@@ -239,8 +243,6 @@ def downscale(
         **kwargs,
     )
 
-    if preserve_dtype:
-        coarsened = coarsened.astype(array.dtype)
 
     if isinstance(array, xarray.DataArray):
         base_coords = array.coords
