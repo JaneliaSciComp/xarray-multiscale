@@ -51,17 +51,24 @@ def test_downscale_2d():
         [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
     )
     arr_dask = da.from_array(arr_numpy, chunks=chunks)
+    arr_xarray = DataArray(arr_dask)
 
     downscaled_numpy_float = downscale(
         arr_numpy, np.mean, scale, preserve_dtype=False
     ).compute()
+
     downscaled_dask_float = downscale(
         arr_dask, np.mean, scale, preserve_dtype=False
+    ).compute()
+
+    downscaled_xarray_float = downscale(
+        arr_xarray, np.mean, scale, preserve_dtype=False
     ).compute()
 
     answer_float = np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]])
     assert np.array_equal(downscaled_numpy_float, answer_float)
     assert np.array_equal(downscaled_dask_float, answer_float)
+    assert np.array_equal(downscaled_xarray_float, answer_float)
 
     downscaled_numpy_int = downscale(
         arr_numpy, np.mean, scale, dtype=arr_numpy.dtype

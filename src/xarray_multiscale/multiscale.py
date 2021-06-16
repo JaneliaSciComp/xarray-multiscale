@@ -1,10 +1,12 @@
 import numpy as np
 import dask.array as da
+import xarray
 from xarray import DataArray
 from typing import Any, List, Optional, Tuple, Union, Sequence, Callable, Dict
 from scipy.interpolate import interp1d
 from dask.array.core import slices_from_chunks, normalize_chunks
 from dask.array import coarsen
+
 
 
 def multiscale(
@@ -14,6 +16,7 @@ def multiscale(
     pad_mode: Optional[str] = None,
     preserve_dtype: bool = True,
     chunks: Optional[Union[Sequence[int], Dict[str, int]]] = None,
+    recursive: bool = False,
 ) -> List[DataArray]:
     """
     Lazily generate a multiscale representation of an array
@@ -32,6 +35,8 @@ def multiscale(
     the reduction function accepts a "dtype" kwarg, e.g. numpy.mean(x, dtype='int').
 
     chunks: Sequence or Dict of ints, defaults to None. If `chunks` is supplied, all DataArrays are rechunked with these chunks before being returned.
+
+    recursive: boolean, defaults to False. ToDo
 
     Returns a list of DataArrays, one per level of downscaling. These DataArrays have `coords` properties that track the changing offset (if any)
     induced by the downsampling operation. Additionally, the scale factors are stored each DataArray's attrs propery under the key `scale_factors`
@@ -55,40 +60,19 @@ def multiscale(
     levels = range(
         0, 1 + get_downscale_depth(padded_shape, scale_factors, pad=needs_padding)
     )
-    scales: Tuple[Tuple[int]] = tuple(
+    scales = tuple(
         tuple(s ** l for s in scale_factors) for l in levels
     )
     result = [_ingest_array(array, scales[0])]
-    data = result[0].data
     base_attrs = result[0].attrs
     base_coords = result[0].coords
 
     for scale in scales[1:]:
         downscaled = downscale(
-            data, reduction, scale, pad_mode=pad_mode, preserve_dtype=preserve_dtype
+            result[0], reduction, scale, pad_mode=pad_mode, preserve_dtype=preserve_dtype
         )
+        result.append(downscaled)
 
-        # hideous
-        new_coords = tuple(
-            DataArray(
-                (offset * (base_coords[bc][1] - base_coords[bc][0]))
-                + (base_coords[bc][:s] * sc),
-                name=base_coords[bc].name,
-                attrs=base_coords[bc].attrs,
-            )
-            for s, bc, offset, sc in zip(
-                downscaled.shape, base_coords, get_downsampled_offset(scale), scale
-            )
-        )
-
-        result.append(
-            DataArray(
-                data=downscaled,
-                coords=new_coords,
-                attrs=base_attrs,
-                name=result[0].name,
-            )
-        )
     if chunks is not None:
         if isinstance(chunks, Sequence):
             _chunks = {k: v for k, v in zip(result[0].dims, chunks)}
@@ -209,13 +193,12 @@ def prepad(
                     extended_coords, dims=k, attrs=old_coord.attrs
                 )
         result = DataArray(
-            result, coords=new_coords, dims=array.dims, attrs=array.attrs
-        )
+            result, coords=new_coords, dims=array.dims, attrs=array.attrs)
     return result
 
 
 def downscale(
-    array: Union[np.array, da.array],
+    array: Union[np.array, da.array, xarray.DataArray],
     reduction: Callable,
     scale_factors: Sequence[int],
     pad_mode: Optional[str] = None,
@@ -241,6 +224,7 @@ def downscale(
     Returns the downscaled version of the input as a dask array.
     -------
     """
+
     trim_excess = False
     if pad_mode == None:
         trim_excess = True
@@ -257,6 +241,23 @@ def downscale(
 
     if preserve_dtype:
         coarsened = coarsened.astype(array.dtype)
+
+    if isinstance(array, xarray.DataArray):
+        base_coords = array.coords
+        new_coords = base_coords
+        if len(base_coords) > 0:
+            new_coords = tuple(
+                DataArray(
+                    (offset * abs(base_coords[bc][1] - base_coords[bc][0]))
+                    + (base_coords[bc][:s] * sc),
+                    name=base_coords[bc].name,
+                    attrs=base_coords[bc].attrs,
+                )
+                for s, bc, offset, sc in zip(
+                    coarsened.shape, base_coords, get_downsampled_offset(scale_factors), scale_factors
+                )
+            )
+        coarsened = DataArray(coarsened, dims=array.dims, coords=new_coords, attrs=array.attrs, name=array.name)
 
     return coarsened
 
