@@ -81,7 +81,7 @@ def test_multiscale():
 
     pyr_trimmed = multiscale(array, np.mean, 2, pad_mode=None)
     pyr_padded = multiscale(array, np.mean, 2, pad_mode="reflect")
-    pyr_trimmed_recursive = multiscale(array, np.mean, 2, pad_mode=None, recursive=True)
+    pyr_trimmed_unchained = multiscale(array, np.mean, 2, pad_mode=None, chained=False)
     assert [p.shape for p in pyr_padded] == [
         shape,
         (5, 5, 5),
@@ -99,6 +99,6 @@ def test_multiscale():
         pyr_trimmed[-2].data.mean().compute(), pyr_trimmed[-1].data.compute().mean()
     )
     assert np.array_equal(
-        pyr_trimmed_recursive[-2].data.mean().compute(), pyr_trimmed_recursive[-1].data.compute().mean()
+        pyr_trimmed_unchained[-2].data.mean().compute(), pyr_trimmed_unchained[-1].data.compute().mean()
     )
     assert np.allclose(pyr_padded[0].data.mean().compute(), 0.17146776406035666)
