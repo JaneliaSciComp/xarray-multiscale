@@ -11,8 +11,6 @@ mypy = "^0.790"
 scipy = "^1.5.4"
 numpy = "^1.19.4"
 dask = "^^2020.12.0"
-cytoolz = "^0.11.0"
-dacite = "^1.6.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
