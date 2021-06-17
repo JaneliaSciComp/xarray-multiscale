@@ -51,28 +51,22 @@ def test_downscale_2d():
         [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
     )
     arr_dask = da.from_array(arr_numpy, chunks=chunks)
+    arr_xarray = DataArray(arr_dask)
 
     downscaled_numpy_float = downscale(
-        arr_numpy, np.mean, scale, preserve_dtype=False
-    ).compute()
+        arr_numpy, np.mean, scale).compute()
+
     downscaled_dask_float = downscale(
-        arr_dask, np.mean, scale, preserve_dtype=False
-    ).compute()
+        arr_dask, np.mean, scale).compute()
+
+    downscaled_xarray_float = downscale(
+        arr_xarray, np.mean, scale).compute()
 
     answer_float = np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]])
+    
     assert np.array_equal(downscaled_numpy_float, answer_float)
     assert np.array_equal(downscaled_dask_float, answer_float)
-
-    downscaled_numpy_int = downscale(
-        arr_numpy, np.mean, scale, dtype=arr_numpy.dtype
-    ).compute()
-    downscaled_dask_int = downscale(
-        arr_dask, np.mean, scale, dtype=arr_numpy.dtype
-    ).compute()
-
-    answer_int = answer_float.astype("int")
-    assert np.array_equal(downscaled_numpy_int, answer_int)
-    assert np.array_equal(downscaled_dask_int, answer_int)
+    assert np.array_equal(downscaled_xarray_float, answer_float)
 
 
 def test_multiscale():
@@ -87,7 +81,7 @@ def test_multiscale():
 
     pyr_trimmed = multiscale(array, np.mean, 2, pad_mode=None)
     pyr_padded = multiscale(array, np.mean, 2, pad_mode="reflect")
-
+    pyr_trimmed_unchained = multiscale(array, np.mean, 2, pad_mode=None, chained=False)
     assert [p.shape for p in pyr_padded] == [
         shape,
         (5, 5, 5),
@@ -103,5 +97,8 @@ def test_multiscale():
 
     assert np.array_equal(
         pyr_trimmed[-2].data.mean().compute(), pyr_trimmed[-1].data.compute().mean()
+    )
+    assert np.array_equal(
+        pyr_trimmed_unchained[-2].data.mean().compute(), pyr_trimmed_unchained[-1].data.compute().mean()
     )
     assert np.allclose(pyr_padded[0].data.mean().compute(), 0.17146776406035666)
