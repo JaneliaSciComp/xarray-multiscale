@@ -291,7 +291,8 @@ def downscale(
             new_coords = tuple(
                 DataArray(
                     (offset * abs(base_coords[bc][1] - base_coords[bc][0]))
-                    + (base_coords[bc][:s] * sc),
+                    + (base_coords[bc][:s] * sc)
+                    - base_coords[bc][0],
                     name=base_coords[bc].name,
                     attrs=base_coords[bc].attrs,
                 )
