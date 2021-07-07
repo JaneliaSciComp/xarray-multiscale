@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xarray-multiscale"
-version = "0.2.0"
+version = "0.2.2"
 description = ""
 authors = ["Davis Vann Bennett <davis.v.bennett@gmail.com>"]
 
