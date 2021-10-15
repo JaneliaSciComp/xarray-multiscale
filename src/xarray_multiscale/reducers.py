@@ -1,6 +1,15 @@
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 from scipy.stats import mode as scipy_mode
 import numpy as np
+
+
+def windowed_mean(array: Any, window_size: Tuple[int, ...], **kwargs: Any):
+    new_shape = []
+    for s, f in zip(array.shape, window_size):
+        new_shape.extend((s // f, f))
+    reshaped = array.reshape(new_shape)
+    result = reshaped.mean(axis=tuple(range(1, len(new_shape), 2)), **kwargs)
+    return result
 
 
 def mode(a: Any, axis: Optional[int] = None) -> Any:

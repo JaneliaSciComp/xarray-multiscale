@@ -1,11 +1,20 @@
+from dataclasses import dataclass
+from numbers import Number
+from dask.base import tokenize
 import numpy as np
 import dask.array as da
+from numpy.lib.arraypad import pad
 import xarray
 from xarray import DataArray
 from typing import Any, Hashable, List, Optional, Tuple, Union, Sequence, Callable, Dict
 from scipy.interpolate import interp1d
+from dask.utils import apply
+from dask.core import flatten
 from dask.array import coarsen
 from dask.array.routines import aligned_coarsen_chunks
+from dask.highlevelgraph import HighLevelGraph
+from dask.array import Array
+from numpy.typing import ArrayLike
 
 
 def multiscale(
@@ -13,7 +22,7 @@ def multiscale(
     reduction: Callable[[Any], Any],
     scale_factors: Union[Sequence[int], int],
     depth: int = -1,
-    pad_mode: Optional[str] = None,
+    pad_mode: str = "crop",
     preserve_dtype: bool = True,
     chunks: Optional[Union[Sequence[int], Dict[Hashable, int]]] = None,
     chunk_mode: str = "rechunk",
@@ -83,24 +92,15 @@ def multiscale(
     if chunk_mode not in chunk_modes:
         raise ValueError(f"chunk_mode must be one of {chunk_modes}, not {chunk_mode}")
 
-    needs_padding = pad_mode != None
-    if isinstance(scale_factors, int):
-        scale_factors = (scale_factors,) * array.ndim
-    else:
-        assert len(scale_factors) == array.ndim
+    scale_factors = broadcast_to_shape(scale_factors, array.ndim)
 
-    if pad_mode is None:
-        # with pad_mode set to "none", dask will trim the data such that it can be tiled
-        # by the scale factors
-        padded_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
-    else:
-        padded_shape = prepad(array, scale_factors, pad_mode=pad_mode).shape
+    normalized = normalize_array(array, scale_factors, pad_mode=None)
+    needs_padding = not (pad_mode == "crop")
 
     all_levels = tuple(
         range(
-            0, 1 + get_downscale_depth(padded_shape,
-                                      scale_factors, 
-                                      pad=needs_padding)
+            0,
+            1 + get_downscale_depth(normalized.shape, scale_factors, pad=needs_padding),
         )
     )
 
@@ -112,16 +112,17 @@ def multiscale(
 
     levels = all_levels[indexer]
     scales = tuple(tuple(s ** level for s in scale_factors) for level in levels)
-    result = [_ingest_array(array, scales[0])]
+    result = [normalized]
 
     if len(levels) > 1:
         for level in levels[1:]:
             if chained:
                 scale = scale_factors
-                downscaled = downscale(result[-1], reduction, scale, pad_mode=pad_mode)
+                source = result[-1]
             else:
                 scale = scales[level]
-                downscaled = downscale(result[0], reduction, scale, pad_mode=pad_mode)
+                source = result[0]
+            downscaled = downscale(source, reduction, scale, pad_mode=pad_mode)
             result.append(downscaled)
 
     if preserve_dtype:
@@ -149,11 +150,14 @@ def multiscale(
     return result
 
 
-def _ingest_array(array: Any, scales: Sequence[int]):
+def normalize_array(
+    array: Any, scale_factors: Sequence[int], pad_mode: Union[str, None]
+) -> DataArray:
     """
-    Ingest an array in preparation for downscaling
+    Ingest an array in preparation for downscaling by converting to DataArray
+    and cropping / padding as needed.
     """
-    if hasattr(array, "coords"):
+    if isinstance(array, DataArray):
         # if the input is a xarray.DataArray, assign a new variable to the DataArray and use the variable
         # `array` to refer to the data property of that array
         data = da.asarray(array.data)
@@ -165,33 +169,19 @@ def _ingest_array(array: Any, scales: Sequence[int]):
     else:
         data = da.asarray(array)
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
+        # If we are assigning positions to elements of an array, then the
+        # first element lies at position 0.5, the second element at 1.5, etc
+        offset = 0.5
         coords = {
-            dim: DataArray(offset + np.arange(s, dtype="float"), dims=dim)
-            for dim, s, offset in zip(dims, array.shape, get_downsampled_offset(scales))
+            dim: DataArray(offset + np.arange(shp, dtype="float"), dims=dim)
+            for dim, shp in zip(dims, array.shape)
         }
         name = None
         attrs = {}
 
-    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
-    return result
-
-
-def even_padding(length: int, window: int) -> int:
-    """
-    Compute how much to add to `length` such that the resulting value is evenly divisible by `window`.
-
-    Parameters
-    ----------
-    length : int
-
-    window : int
-
-    Returns
-    -------
-    int
-        Value that, when added to `length`, results in a sum that is evenly divided by `window`
-    """
-    return (window - (length % window)) % window
+    dataArray = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
+    reshaped = adjust_shape(dataArray, scale_factors=scale_factors, mode=pad_mode)
+    return reshaped
 
 
 def logn(x: float, n: float) -> float:
@@ -213,14 +203,11 @@ def logn(x: float, n: float) -> float:
     return result
 
 
-def prepad(
-    array: Any,
-    scale_factors: Sequence[int],
-    pad_mode: Optional[str] = "reflect",
-    rechunk: bool = True,
-) -> da.array:
+def adjust_shape(
+    array: DataArray, scale_factors: Sequence[int], mode: Union[str, None]
+) -> DataArray:
     """
-    Lazily pad an array such that its new dimensions are evenly divisible by some integer.
+    Pad or crop array such that its new dimensions are evenly divisible by a set of integers.
 
     Parameters
     ----------
@@ -232,142 +219,101 @@ def prepad(
         by the corresponding scale factor, and chunks that are smaller than or equal
         to the scale factor (if the array has chunks)
 
-    pad_mode : str
-        The edge mode used by the padding routine. This parameter will be passed to
+    mode : str
+        If set to "crop", then the input array will be cropped as needed. Otherwise,
+        this is the edge mode used by the padding routine. This parameter will be passed to
         `dask.array.pad` as the `mode` keyword.
 
     Returns
     -------
     dask array
     """
-
-    if pad_mode == None:
-        # no op
-        return array
-
-    pw = tuple(
-        (0, even_padding(ax, scale)) for ax, scale in zip(array.shape, scale_factors)
-    )
-
-    result = da.pad(array, pw, mode=pad_mode)
-
-    # rechunk so that small extra chunks added by padding are fused into larger chunks, but only if we had to add chunks after padding
-    if rechunk and np.any(pw):
-        new_chunks = tuple(
-            np.multiply(
-                scale_factors, np.ceil(np.divide(result.chunksize, scale_factors))
-            ).astype("int")
-        )
-        result = result.rechunk(new_chunks)
-
-    if hasattr(array, "coords"):
-        new_coords = {}
-        for p, k in zip(pw, array.coords):
-            old_coord = array.coords[k]
-            if np.diff(p) == 0:
-                new_coords[k] = old_coord
-            else:
-                extended_coords = interp1d(
-                    np.arange(len(old_coord.values)),
-                    old_coord.values,
-                    fill_value="extrapolate",
-                )(np.arange(len(old_coord.values) + p[-1])).astype(old_coord.dtype)
-                new_coords[k] = DataArray(
-                    extended_coords, dims=k, attrs=old_coord.attrs
-                )
-        result = DataArray(
-            result, coords=new_coords, dims=array.dims, attrs=array.attrs
-        )
+    result = array
+    misalignment = np.any(np.mod(array.shape, scale_factors))
+    if misalignment and (mode != None):
+        if mode == "crop":
+            new_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
+            result = array.isel({d: slice(s) for d, s in zip(array.dims, new_shape)})
+        else:
+            new_shape = np.add(
+                array.shape,
+                np.subtract(scale_factors, np.mod(array.shape, scale_factors)),
+            )
+            pw = {
+                dim: (0, int(new - old))
+                for dim, new, old in zip(array.dims, new_shape, array.shape)
+                if old != new
+            }
+            result = array.pad(pad_width=pw, mode=mode)
     return result
 
 
-def downscale(
-    array: Union[Any, xarray.DataArray],
-    reduction: Callable[[Any], Any],
-    scale_factors: Sequence[int],
-    pad_mode: Optional[str] = None,
-    **kwargs,
-) -> DataArray:
-    """
-    Downscale an array using windowed aggregation. This function is a light wrapper for `dask.array.coarsen`.
+def downscale_dask(
+    array: Any,
+    reduction: Callable[[ArrayLike, Any], ArrayLike],
+    scale_factors: Union[int, Sequence[int], Dict[int, int]],
+    **kwargs: Any,
+) -> Any:
 
-    Parameters
-    ----------
-    array : numpy array, dask array, xarray DataArray
-        The array to be downscaled.
-
-    reduction : callable
-        A function that aggregates chunks of data over windows. See the documentation of `dask.array.coarsen` for the expected
-        signature of this callable.
-
-    scale_factors : iterable of ints
-        The desired downscaling factors, one for each axis.
-
-    trim_excess : bool, default=False
-        Whether the size of the input array should be increased or decreased such that
-        each scale factor tiles its respective array axis. Defaults to False, which will result in the input being padded.
-
-    **kwargs
-        extra kwargs passed to dask.array.coarsen
-
-    Returns the downscaled version of the input as a dask array.
-    -------
-    """
-
-    trim_excess = False
-    if pad_mode == None:
-        trim_excess = True
-
-    to_coarsen = prepad(da.asarray(array), scale_factors, pad_mode=pad_mode)
-
-    new_chunks = {}
-    for idx, factor in enumerate(scale_factors):
-        aligned = aligned_coarsen_chunks(to_coarsen.chunks[idx], factor)
-        if aligned != to_coarsen.chunks[idx]:
-            new_chunks[idx] = aligned
-    if new_chunks:
-        to_coarsen = to_coarsen.rechunk(new_chunks)
-
-    coarsened = coarsen(
-        reduction,
-        to_coarsen,
-        {d: s for d, s in enumerate(scale_factors)},
-        trim_excess=trim_excess,
-        **kwargs,
-    )
-
-    if isinstance(array, xarray.DataArray):
-        base_coords = array.coords
-        new_coords = base_coords
-        if len(base_coords) > 0:
-            new_coords = tuple(
-                DataArray(
-                    (offset * abs(base_coords[bc][1] - base_coords[bc][0]))
-                    + (base_coords[bc][:s] * sc)
-                    - base_coords[bc][0],
-                    name=base_coords[bc].name,
-                    attrs=base_coords[bc].attrs,
-                )
-                for s, bc, offset, sc in zip(
-                    coarsened.shape,
-                    base_coords,
-                    get_downsampled_offset(scale_factors),
-                    scale_factors,
-                )
-            )
-        coarsened = DataArray(
-            coarsened,
-            dims=array.dims,
-            coords=new_coords,
-            attrs=array.attrs,
-            name=array.name,
+    if not np.all((np.array(array.shape) % np.array(scale_factors)) == 0):
+        raise ValueError(
+            f"Coarsening factors {scale_factors} do not align with array shape {array.shape}."
         )
 
-    return coarsened
+    array = align_chunks(array, scale_factors)
+    name = "downscale-" + tokenize(reduction, array, scale_factors)
+    dsk = {
+        (name,) + key[1:]: (apply, reduction, [key, scale_factors], kwargs)
+        for key in flatten(array.__dask_keys__())
+    }
+    chunks = tuple(
+        tuple(int(size // scale_factors[axis]) for size in sizes)
+        for axis, sizes in enumerate(array.chunks)
+    )
+
+    meta = reduction(
+        np.empty(scale_factors, dtype=array.dtype), scale_factors, **kwargs
+    )
+    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[array])
+    return Array(graph, name, chunks, meta=meta)
+
+
+def downscale(
+    array: DataArray,
+    reduction: Callable[[ArrayLike, Any], ArrayLike],
+    scale_factors: Sequence[int],
+    pad_mode,
+    **kwargs: Any,
+) -> Any:
+
+    to_downscale = normalize_array(array, scale_factors, pad_mode=pad_mode)
+    downscaled_data = downscale_dask(
+        to_downscale.data, reduction, scale_factors, **kwargs
+    )
+    downscaled_coords = downscale_coords(to_downscale, scale_factors)
+    return DataArray(downscaled_data, downscaled_coords, attrs=array.attrs)
+
+
+def downscale_coords(
+    array: DataArray, scale_factors: Sequence[int]
+) -> Dict[Hashable, Any]:
+    """
+    Take the windowed mean of each coordinate array.
+    """
+    new_coords = {}
+    for (
+        coord_name,
+        coord,
+    ) in array.coords.items():
+        coarsening_dims = {
+            d: scale_factors[idx] for idx, d in enumerate(array.dims) if d in coord.dims
+        }
+        new_coords[coord_name] = coord.coarsen(coarsening_dims).mean()
+    return new_coords
 
 
 def get_downscale_depth(
-    shape: Tuple[int, ...], scale_factors: Sequence[int], pad=False
+    shape: Tuple[int, ...], scale_factors: Sequence[int], pad: bool = False
 ) -> int:
     """
     For an array and a sequence of scale factors, calculate the maximum possible number of downscaling operations.
@@ -430,7 +376,7 @@ def slice_span(sl: slice) -> int:
 
 def normalize_chunks(
     array: xarray.DataArray, chunks: Union[int, Sequence[int], Dict[Hashable, int]]
-) -> Tuple[int]:
+) -> Tuple[int, ...]:
     from xarray.core.utils import is_dict_like
 
     if is_dict_like(chunks):
@@ -441,7 +387,7 @@ def normalize_chunks(
     return chunks
 
 
-def ensure_minimum_chunks(array: da.core.Array, chunks: Sequence[int]) -> Tuple[int]:
+def ensure_minimum_chunks(array: Any, chunks: Sequence[int]) -> Tuple[int, ...]:
     old_chunks = np.array(array.chunksize)
     new_chunks = old_chunks.copy()
     chunk_fitness = np.less(old_chunks, chunks)
@@ -450,3 +396,45 @@ def ensure_minimum_chunks(array: da.core.Array, chunks: Sequence[int]) -> Tuple[
         return tuple(new_chunks.tolist())
     else:
         return tuple(array.chunks)
+
+
+def broadcast_to_shape(
+    value: Union[int, Sequence[int], Dict[int, int]], rank: int
+) -> Tuple[int, ...]:
+    result_dict = {}
+    if isinstance(value, int):
+        result_dict = {k: value for k in range(rank)}
+    elif isinstance(value, Sequence):
+        if not (len(value) == rank):
+            raise ValueError(f"Length of value {len(value)} must match rank: {rank}")
+        else:
+            result_dict = {k: v for k, v in enumerate(value)}
+    elif isinstance(value, dict):
+        for dim in range(rank):
+            result_dict[dim] = value.get(dim, 1)
+    else:
+        raise ValueError(
+            f"The first argument to this function must be a number, a sequence of numbers, or a dict of numbers. Got {type(value)}"
+        )
+    result = tuple(result_dict.values())
+    typecheck = tuple(isinstance(val, int) for val in result)
+    if not all(typecheck):
+        bad_values = (result[idx] for idx, val in enumerate(typecheck) if not val)
+        raise ValueError(
+            f"All elements of the first argument of this function must be ints. Non-integer values: {bad_values}"
+        )
+    return result
+
+
+def align_chunks(array: Any, scale_factors: Sequence[int]):
+    """
+    Ensure that all chunks are divisible by scale_factors
+    """
+    new_chunks = {}
+    for idx, factor in enumerate(scale_factors):
+        aligned = aligned_coarsen_chunks(array.chunks[idx], factor)
+        if aligned != array.chunks[idx]:
+            new_chunks[idx] = aligned
+    if new_chunks:
+        array = array.rechunk(new_chunks)
+    return array
