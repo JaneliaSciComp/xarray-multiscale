@@ -1,4 +1,5 @@
 import pytest
+import xarray
 from xarray.core import dataarray
 from xarray_multiscale.multiscale import (
     downscale,
@@ -6,6 +7,8 @@ from xarray_multiscale.multiscale import (
     multiscale,
     even_padding,
     get_downscale_depth,
+    normalize_chunks,
+    ensure_minimum_chunks
 )
 import dask.array as da
 import numpy as np
@@ -109,6 +112,51 @@ def test_multiscale():
     assert np.allclose(pyr_padded[0].data.mean().compute(), 0.17146776406035666)
 
 
+def test_chunking():
+    ndim = 3
+    shape = (9,) * ndim
+    base_array = da.zeros(shape, chunks=(1,) * ndim)
+    chunks = (1,) * ndim
+    multi = multiscale(base_array, np.mean, 2, chunks=chunks)
+    assert all([m.data.chunksize == chunks for m in multi])
+
+    chunks = (3,) * ndim
+    multi = multiscale(base_array, np.mean, 2, chunks=chunks)
+    for m in multi:
+        assert m.data.chunksize == chunks or m.data.chunksize == m.data.shape
+
+    chunks = (3,) * ndim
+    multi = multiscale(base_array, np.mean, 2, chunks=chunks, chunk_mode='minimum')
+    for m in multi:
+        assert np.greater_equal(m.data.chunksize, chunks).all() or m.data.chunksize == m.data.shape
+
+    chunks = 3
+    multi = multiscale(base_array, np.mean, 2, chunks=chunks, chunk_mode='minimum')
+    for m in multi:
+        assert np.greater_equal(m.data.chunksize, (chunks,) * ndim).all() or m.data.chunksize == m.data.shape 
+
+
+def test_depth():
+    ndim = 3
+    shape = (16,) * ndim
+    base_array = np.zeros(shape)
+
+    full = multiscale(base_array, np.mean, 2, depth=-1)
+    assert len(full) == 5
+
+    partial = multiscale(base_array, np.mean, 2, depth=-2)
+    assert len(partial) == len(full) - 1 
+    [assert_equal(a,b) for a,b in zip(full, partial)]
+
+    partial = multiscale(base_array, np.mean, 2, depth=2)
+    assert len(partial) == 3 
+    [assert_equal(a,b) for a,b in zip(full, partial)]
+
+    partial = multiscale(base_array, np.mean, 2, depth=0)
+    assert len(partial) == 1 
+    [assert_equal(a,b) for a,b in zip(full, partial)]
+
+
 def test_coords():
     dims = ("z", "y", "x")
     shape = (16,) * len(dims)
@@ -127,3 +175,15 @@ def test_coords():
 
     assert_equal(multi[0], dataarray)
     assert_equal(multi[1], downscaled)
+
+
+def test_normalize_chunks():
+    data = DataArray(da.zeros((4,6), chunks=(1,1)))
+    assert normalize_chunks(data, {'dim_0' : 2, 'dim_1' : 1}) == (2,1)
+
+def test_ensure_minimum_chunks():
+    data = da.zeros((4,6), chunks=(1,1))
+    assert ensure_minimum_chunks(data, (2,2)) == (2,2)
+
+    data = da.zeros((4,6), chunks=(4,1))
+    assert ensure_minimum_chunks(data, (2,2)) == (4,2)

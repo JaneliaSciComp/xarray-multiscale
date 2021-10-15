@@ -10,7 +10,7 @@ xarray = ">=0.17"
 mypy = "^0.790"
 scipy = "^1.5.4"
 numpy = "^1.19.4"
-dask = "^^2020.12.0"
+dask = "^2021.9.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
@@ -20,3 +20,6 @@ zarr = "^2.6.1"
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
+
+[mypy]
+plugins = "numpy.typing.mypy_plugin"
