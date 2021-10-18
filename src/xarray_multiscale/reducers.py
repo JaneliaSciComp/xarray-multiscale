@@ -1,4 +1,5 @@
 from typing import Any, Sequence, Tuple
+from numpy.core.fromnumeric import reshape
 from scipy.stats import mode
 
 
@@ -6,11 +7,8 @@ def windowed_mean(array: Any, window_size: Tuple[int, ...], **kwargs: Any):
     """
     Compute the windowed mean of an array.
     """
-    new_shape = []
-    for s, f in zip(array.shape, window_size):
-        new_shape.extend((s // f, f))
-    reshaped = array.reshape(new_shape)
-    result = reshaped.mean(axis=tuple(range(1, len(new_shape), 2)), **kwargs)
+    reshaped = reshape_with_windows(array, window_size)
+    result = reshaped.mean(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
     return result
 
 
