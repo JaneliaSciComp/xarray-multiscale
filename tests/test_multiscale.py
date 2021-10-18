@@ -2,14 +2,17 @@ import pytest
 import xarray
 from xarray.core import dataarray
 from xarray_multiscale.multiscale import (
+    align_chunks,
     downscale,
-    prepad,
+    broadcast_to_shape,
+    adjust_shape,
+    downscale_coords,
     multiscale,
-    even_padding,
     get_downscale_depth,
     normalize_chunks,
     ensure_minimum_chunks
 )
+from xarray_multiscale.reducers import windowed_mean
 import dask.array as da
 import numpy as np
 from xarray import DataArray
@@ -29,48 +32,75 @@ def test_downscale_depth():
     assert get_downscale_depth((1500, 5495, 5200), (2, 2, 2)) == 10
 
 
-@pytest.mark.parametrize(("size", "scale"), ((10, 2), (11, 2), (12, 2), (13, 2)))
-def test_even_padding(size: int, scale: int) -> None:
-    assert (size + even_padding(size, scale)) % scale == 0
+@pytest.mark.parametrize(("size", "scale"), ((10, 2), (11, 2), ((10,11), (2,3))))
+def test_adjust_shape(size, scale):
+    arr = DataArray(np.zeros(size))
+    padded = adjust_shape(arr, scale, mode="constant")
+    scale_array = np.array(scale)
+    old_shape_array = np.array(arr.shape)
+    new_shape_array = np.array(padded.shape)
+    
+    if np.all((old_shape_array % scale_array) == 0):
+        assert np.array_equal(new_shape_array, old_shape_array)
+    else:
+        assert np.array_equal(new_shape_array, old_shape_array + ((scale_array - (old_shape_array % scale_array))))
 
-
-@pytest.mark.parametrize("dim", (1, 2, 3, 4))
-def test_prepad(dim: int) -> None:
-    size = (10,) * dim
-    chunks = (9,) * dim
-    scale = (2,) * dim
-
-    arr = da.zeros(size, chunks=chunks)
-    arr2 = DataArray(arr)
-
-    padded = prepad(arr, scale)
-    assert np.all(np.mod(padded.shape, scale) == 0)
-
-    padded2 = prepad(arr2, scale)
-    assert np.all(np.mod(padded2.shape, scale) == 0)
-
+    cropped = adjust_shape(arr, scale, mode="crop")
+    new_shape_array = np.array(cropped.shape)
+    if np.all((old_shape_array % scale_array) == 0):
+        assert np.array_equal(new_shape_array, old_shape_array)
+    else:
+        assert np.array_equal(new_shape_array, old_shape_array - (old_shape_array % scale_array))
 
 def test_downscale_2d():
     chunks = (2, 2)
     scale = (2, 1)
 
-    arr_numpy = np.array(
+    data = DataArray(da.from_array(np.array(
         [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
-    )
-    arr_dask = da.from_array(arr_numpy, chunks=chunks)
-    arr_xarray = DataArray(arr_dask)
+    ), chunks=chunks))
+    answer = DataArray(np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]))
+    downscaled = downscale(data, windowed_mean, scale, pad_mode='crop').compute()
+    assert np.array_equal(downscaled, answer)
 
-    downscaled_numpy_float = downscale(arr_numpy, np.mean, scale).compute()
 
-    downscaled_dask_float = downscale(arr_dask, np.mean, scale).compute()
+def test_downscale_coords():
+    data = DataArray(np.zeros((10, 10)), dims=('x','y'), coords={'x': np.arange(10)})
+    scale_factors = (2,1)
+    downscaled = downscale_coords(data, scale_factors)
+    answer = {'x': data['x'].coarsen({'x' : scale_factors[0]}).mean()}
+    
+    assert downscaled.keys() == answer.keys()
+    for k in downscaled:
+        assert_equal(answer[k], downscaled[k])
 
-    downscaled_xarray_float = downscale(arr_xarray, np.mean, scale).compute()
+    data = DataArray(np.zeros((10, 10)), 
+                     dims=('x','y'), 
+                     coords={'x': np.arange(10), 
+                             'y': 5 + np.arange(10)})
+    scale_factors = (2,1)
+    downscaled = downscale_coords(data, scale_factors)
+    answer = {'x': data['x'].coarsen({'x' : scale_factors[0]}).mean(),
+             'y' : data['y'].coarsen({'y' : scale_factors[1]}).mean()}
+    
+    assert downscaled.keys() == answer.keys()
+    for k in downscaled:
+        assert_equal(answer[k], downscaled[k])
 
-    answer_float = np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]])
-
-    assert np.array_equal(downscaled_numpy_float, answer_float)
-    assert np.array_equal(downscaled_dask_float, answer_float)
-    assert np.array_equal(downscaled_xarray_float, answer_float)
+    data = DataArray(np.zeros((10, 10)), 
+                     dims=('x','y'), 
+                     coords={'x': np.arange(10), 
+                             'y': 5 + np.arange(10),
+                             'foo' : 5})
+    scale_factors = (2,2)
+    downscaled = downscale_coords(data, scale_factors)
+    answer = {'x': data['x'].coarsen({'x' : scale_factors[0]}).mean(),
+             'y' : data['y'].coarsen({'y' : scale_factors[1]}).mean(),
+             'foo': data['foo']}
+    
+    assert downscaled.keys() == answer.keys()
+    for k in downscaled:
+        assert_equal(answer[k], downscaled[k])
 
 
 def test_multiscale():
@@ -84,10 +114,10 @@ def test_multiscale():
     base_array = np.tile(cell, np.ceil(np.divide(shape, chunks)).astype("int"))[
         cropslice
     ]
-    pyr_trimmed = multiscale(base_array, np.mean, 2, pad_mode=None)
-    pyr_padded = multiscale(base_array, np.mean, 2, pad_mode="reflect")
+    pyr_trimmed = multiscale(base_array, windowed_mean, 2, pad_mode="crop")
+    pyr_padded = multiscale(base_array, windowed_mean, 2, pad_mode="constant")
     pyr_trimmed_unchained = multiscale(
-        base_array, np.mean, 2, pad_mode=None, chained=False
+        base_array, windowed_mean, 2, pad_mode="crop", chained=False
     )
     assert [p.shape for p in pyr_padded] == [
         shape,
@@ -117,21 +147,22 @@ def test_chunking():
     shape = (9,) * ndim
     base_array = da.zeros(shape, chunks=(1,) * ndim)
     chunks = (1,) * ndim
-    multi = multiscale(base_array, np.mean, 2, chunks=chunks)
+    reducer = windowed_mean
+    multi = multiscale(base_array, reducer, 2, chunks=chunks)
     assert all([m.data.chunksize == chunks for m in multi])
 
     chunks = (3,) * ndim
-    multi = multiscale(base_array, np.mean, 2, chunks=chunks)
+    multi = multiscale(base_array, reducer, 2, chunks=chunks)
     for m in multi:
         assert m.data.chunksize == chunks or m.data.chunksize == m.data.shape
 
     chunks = (3,) * ndim
-    multi = multiscale(base_array, np.mean, 2, chunks=chunks, chunk_mode='minimum')
+    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_mode='minimum')
     for m in multi:
         assert np.greater_equal(m.data.chunksize, chunks).all() or m.data.chunksize == m.data.shape
 
     chunks = 3
-    multi = multiscale(base_array, np.mean, 2, chunks=chunks, chunk_mode='minimum')
+    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_mode='minimum')
     for m in multi:
         assert np.greater_equal(m.data.chunksize, (chunks,) * ndim).all() or m.data.chunksize == m.data.shape 
 
@@ -140,19 +171,19 @@ def test_depth():
     ndim = 3
     shape = (16,) * ndim
     base_array = np.zeros(shape)
-
-    full = multiscale(base_array, np.mean, 2, depth=-1)
+    reducer = windowed_mean
+    full = multiscale(base_array, reducer, 2, depth=-1)
     assert len(full) == 5
 
-    partial = multiscale(base_array, np.mean, 2, depth=-2)
+    partial = multiscale(base_array, reducer, 2, depth=-2)
     assert len(partial) == len(full) - 1 
     [assert_equal(a,b) for a,b in zip(full, partial)]
 
-    partial = multiscale(base_array, np.mean, 2, depth=2)
+    partial = multiscale(base_array, reducer, 2, depth=2)
     assert len(partial) == 3 
     [assert_equal(a,b) for a,b in zip(full, partial)]
 
-    partial = multiscale(base_array, np.mean, 2, depth=0)
+    partial = multiscale(base_array, reducer, 2, depth=0)
     assert len(partial) == 1 
     [assert_equal(a,b) for a,b in zip(full, partial)]
 
@@ -171,7 +202,7 @@ def test_coords():
     dataarray = DataArray(base_array, coords=coords)
     downscaled = dataarray.coarsen({"z": 2, "y": 2, "x": 2}).mean()
 
-    multi = multiscale(dataarray, np.mean, (2, 2, 2), preserve_dtype=False)
+    multi = multiscale(dataarray, windowed_mean, (2, 2, 2), preserve_dtype=False)
 
     assert_equal(multi[0], dataarray)
     assert_equal(multi[1], downscaled)
@@ -181,9 +212,31 @@ def test_normalize_chunks():
     data = DataArray(da.zeros((4,6), chunks=(1,1)))
     assert normalize_chunks(data, {'dim_0' : 2, 'dim_1' : 1}) == (2,1)
 
+
 def test_ensure_minimum_chunks():
     data = da.zeros((4,6), chunks=(1,1))
     assert ensure_minimum_chunks(data, (2,2)) == (2,2)
 
     data = da.zeros((4,6), chunks=(4,1))
     assert ensure_minimum_chunks(data, (2,2)) == (4,2)
+
+
+def test_broadcast_to_shape():
+    assert broadcast_to_shape(2, 1) == (2,)
+    assert broadcast_to_shape(2, 2) == (2,2)
+    assert broadcast_to_shape((2,3), 2) == (2,3)
+    assert broadcast_to_shape({0 : 2}, 3) == (2,1,1)
+
+
+def test_align_chunks():
+    data = da.arange(10, chunks=1)
+    rechunked = align_chunks(data, scale_factors=(2,))
+    assert rechunked.chunks == ((2,) * 5,)
+
+    data = da.arange(10, chunks=2)
+    rechunked = align_chunks(data, scale_factors=(2,))
+    assert rechunked.chunks == ((2,) * 5,)
+
+    data = da.arange(10, chunks=(1,1,3,5))
+    rechunked = align_chunks(data, scale_factors=(2,))
+    assert rechunked.chunks == ((2, 2, 2, 4,),)
