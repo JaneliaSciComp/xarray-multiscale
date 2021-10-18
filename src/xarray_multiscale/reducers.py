@@ -1,5 +1,5 @@
-from typing import Any, Tuple
-from scipy.stats import mode as scipy_mode
+from typing import Any, Sequence, Tuple
+from scipy.stats import mode
 
 
 def windowed_mean(array: Any, window_size: Tuple[int, ...], **kwargs: Any):
@@ -14,15 +14,22 @@ def windowed_mean(array: Any, window_size: Tuple[int, ...], **kwargs: Any):
     return result
 
 
-def windowed_mode(a: Any, window_size: Tuple[int, ...], **kwargs: Any) -> Any:
+def windowed_mode(array: Any, window_size: Tuple[int, ...], **kwargs: Any) -> Any:
     """
     Coarsening by computing the n-dimensional mode.
     """
+    reshaped = reshape_with_windows(array, window_size)
+    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(
+        range(1, reshaped.ndim, 2)
+    )
+    transposed = reshaped.transpose(transposed_shape)
+    collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
+    result = mode(collapsed, axis=collapsed.ndim - 1).mode.squeeze(axis=-1)
+    return result
+
+
+def reshape_with_windows(array, window_size: Sequence[int]):
     new_shape = []
     for s, f in zip(array.shape, window_size):
         new_shape.extend((s // f, f))
-    transposed_shape = new_shape[slice(0, None, 2)] +  new_shape[slice(1,None,2)]
-    reshaped = array.reshape(new_shape).transpose(transposed_shape).reshape(new_shape[slice(0, None, 2)] + (-1,))
-    modes = scipy_mode(reshaped, axis=-1).mode
-    result = modes.squeeze(axis=-1)
-    return result
+    return array.reshape(new_shape)

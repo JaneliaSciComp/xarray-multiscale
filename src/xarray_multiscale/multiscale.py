@@ -230,7 +230,7 @@ def adjust_shape(
     """
     result = array
     misalignment = np.any(np.mod(array.shape, scale_factors))
-    if misalignment and (mode != None):
+    if misalignment and (mode is not None):
         if mode == "crop":
             new_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
             result = array.isel({d: slice(s) for d, s in zip(array.dims, new_shape)})
