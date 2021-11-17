@@ -1,25 +1,32 @@
-from dataclasses import dataclass
-from numbers import Number
 from dask.base import tokenize
 import numpy as np
 import dask.array as da
-from numpy.lib.arraypad import pad
 import xarray
 from xarray import DataArray
-from typing import Any, Hashable, List, Optional, Tuple, Union, Sequence, Callable, Dict
-from scipy.interpolate import interp1d
+from typing import (
+    Any,
+    Hashable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    Sequence,
+    Callable,
+    Dict,
+    cast,
+)
 from dask.utils import apply
 from dask.core import flatten
-from dask.array import coarsen
 from dask.array.routines import aligned_coarsen_chunks
 from dask.highlevelgraph import HighLevelGraph
 from dask.array import Array
-from numpy.typing import ArrayLike
+from numpy.typing import NDArray
+from xarray.core.utils import is_dict_like
 
 
 def multiscale(
     array: Any,
-    reduction: Callable[[Any], Any],
+    reduction: Callable[[NDArray[Any], Tuple[int, ...], Dict[Any, Any]], NDArray[Any]],
     scale_factors: Union[Sequence[int], int],
     depth: int = -1,
     pad_mode: str = "crop",
@@ -92,8 +99,7 @@ def multiscale(
     if chunk_mode not in chunk_modes:
         raise ValueError(f"chunk_mode must be one of {chunk_modes}, not {chunk_mode}")
 
-    scale_factors = broadcast_to_shape(scale_factors, array.ndim)
-
+    scale_factors = broadcast_to_rank(scale_factors, array.ndim)
     normalized = normalize_array(array, scale_factors, pad_mode=None)
     needs_padding = not (pad_mode == "crop")
 
@@ -169,9 +175,7 @@ def normalize_array(
     else:
         data = da.asarray(array)
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
-        # If we are assigning positions to elements of an array, then the
-        # first element lies at position 0.5, the second element at 1.5, etc
-        offset = 0.5
+        offset = 0.0
         coords = {
             dim: DataArray(offset + np.arange(shp, dtype="float"), dims=dim)
             for dim, shp in zip(dims, array.shape)
@@ -250,7 +254,7 @@ def adjust_shape(
 
 def downscale_dask(
     array: Any,
-    reduction: Callable[[ArrayLike, Any], ArrayLike],
+    reduction: Callable[[NDArray[Any], Tuple[int, ...]], NDArray[Any]],
     scale_factors: Union[int, Sequence[int], Dict[int, int]],
     **kwargs: Any,
 ) -> Any:
@@ -280,9 +284,9 @@ def downscale_dask(
 
 def downscale(
     array: DataArray,
-    reduction: Callable[[ArrayLike, Any], ArrayLike],
+    reduction: Callable[[NDArray[Any], Tuple[int, ...]], NDArray[Any]],
     scale_factors: Sequence[int],
-    pad_mode,
+    pad_mode: str,
     **kwargs: Any,
 ) -> Any:
 
@@ -377,17 +381,19 @@ def slice_span(sl: slice) -> int:
 def normalize_chunks(
     array: xarray.DataArray, chunks: Union[int, Sequence[int], Dict[Hashable, int]]
 ) -> Tuple[int, ...]:
-    from xarray.core.utils import is_dict_like
 
     if is_dict_like(chunks):
         chunks = {array.get_axis_num(dim): chunk for dim, chunk in chunks.items()}
     # normalize to explicit chunks, then take the first element from each
     # collection of explicit chunks
     chunks = tuple(c[0] for c in da.core.normalize_chunks(chunks, array.shape))
+    cast(Tuple[int, ...], chunks)
     return chunks
 
 
-def ensure_minimum_chunks(array: Any, chunks: Sequence[int]) -> Tuple[int, ...]:
+def ensure_minimum_chunks(
+    array: da.core.Array, chunks: Sequence[int]
+) -> Tuple[int, ...]:
     old_chunks = np.array(array.chunksize)
     new_chunks = old_chunks.copy()
     chunk_fitness = np.less(old_chunks, chunks)
@@ -398,7 +404,7 @@ def ensure_minimum_chunks(array: Any, chunks: Sequence[int]) -> Tuple[int, ...]:
         return tuple(array.chunks)
 
 
-def broadcast_to_shape(
+def broadcast_to_rank(
     value: Union[int, Sequence[int], Dict[int, int]], rank: int
 ) -> Tuple[int, ...]:
     result_dict = {}
@@ -414,19 +420,19 @@ def broadcast_to_shape(
             result_dict[dim] = value.get(dim, 1)
     else:
         raise ValueError(
-            f"The first argument to this function must be a number, a sequence of numbers, or a dict of numbers. Got {type(value)}"
+            f"The first argument must be an int, a sequence of ints, or a dict of ints. Got {type(value)}"
         )
     result = tuple(result_dict.values())
     typecheck = tuple(isinstance(val, int) for val in result)
     if not all(typecheck):
-        bad_values = (result[idx] for idx, val in enumerate(typecheck) if not val)
+        bad_values = tuple(result[idx] for idx, val in enumerate(typecheck) if not val)
         raise ValueError(
             f"All elements of the first argument of this function must be ints. Non-integer values: {bad_values}"
         )
     return result
 
 
-def align_chunks(array: Any, scale_factors: Sequence[int]):
+def align_chunks(array: da.core.Array, scale_factors: Sequence[int]) -> da.core.Array:
     """
     Ensure that all chunks are divisible by scale_factors
     """

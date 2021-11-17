@@ -1,18 +1,21 @@
-from typing import Any, Sequence, Tuple
-from numpy.core.fromnumeric import reshape
+from typing import Any, Sequence, Tuple, cast, TypeVar, Dict
 from scipy.stats import mode
+from numpy.typing import NDArray
 
 
-def windowed_mean(array: Any, window_size: Tuple[int, ...], **kwargs: Any):
+def windowed_mean(
+    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Dict[Any, Any]
+) -> NDArray[Any]:
     """
     Compute the windowed mean of an array.
     """
     reshaped = reshape_with_windows(array, window_size)
     result = reshaped.mean(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    cast(NDArray[Any], result)
     return result
 
 
-def windowed_mode(array: Any, window_size: Tuple[int, ...], **kwargs: Any) -> Any:
+def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
     """
     Coarsening by computing the n-dimensional mode.
     """
@@ -26,8 +29,10 @@ def windowed_mode(array: Any, window_size: Tuple[int, ...], **kwargs: Any) -> An
     return result
 
 
-def reshape_with_windows(array, window_size: Sequence[int]):
-    new_shape = []
+def reshape_with_windows(
+    array: NDArray[Any], window_size: Sequence[int]
+) -> NDArray[Any]:
+    new_shape = ()
     for s, f in zip(array.shape, window_size):
-        new_shape.extend((s // f, f))
+        new_shape += (s // f, f)
     return array.reshape(new_shape)

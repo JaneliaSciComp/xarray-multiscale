@@ -1,18 +1,17 @@
 import pytest
-import xarray
-from xarray.core import dataarray
 from xarray_multiscale.multiscale import (
     align_chunks,
     downscale,
-    broadcast_to_shape,
+    broadcast_to_rank,
     adjust_shape,
     downscale_coords,
+    downscale_dask,
     multiscale,
     get_downscale_depth,
     normalize_chunks,
     ensure_minimum_chunks
 )
-from xarray_multiscale.reducers import windowed_mean
+from xarray_multiscale.reducers import reshape_with_windows, windowed_mean, windowed_mode
 import dask.array as da
 import numpy as np
 from xarray import DataArray
@@ -101,6 +100,13 @@ def test_downscale_coords():
     assert downscaled.keys() == answer.keys()
     for k in downscaled:
         assert_equal(answer[k], downscaled[k])
+
+
+def test_invalid_multiscale():
+    with pytest.raises(ValueError):
+        downscale_dask(np.arange(10), windowed_mean, (3,))
+    with pytest.raises(ValueError):
+        downscale_dask(np.arange(16).reshape(4,4), windowed_mean, (3,3))
 
 
 def test_multiscale():
@@ -221,11 +227,11 @@ def test_ensure_minimum_chunks():
     assert ensure_minimum_chunks(data, (2,2)) == (4,2)
 
 
-def test_broadcast_to_shape():
-    assert broadcast_to_shape(2, 1) == (2,)
-    assert broadcast_to_shape(2, 2) == (2,2)
-    assert broadcast_to_shape((2,3), 2) == (2,3)
-    assert broadcast_to_shape({0 : 2}, 3) == (2,1,1)
+def test_broadcast_to_rank():
+    assert broadcast_to_rank(2, 1) == (2,)
+    assert broadcast_to_rank(2, 2) == (2,2)
+    assert broadcast_to_rank((2,3), 2) == (2,3)
+    assert broadcast_to_rank({0 : 2}, 3) == (2,1,1)
 
 
 def test_align_chunks():
@@ -240,3 +246,8 @@ def test_align_chunks():
     data = da.arange(10, chunks=(1,1,3,5))
     rechunked = align_chunks(data, scale_factors=(2,))
     assert rechunked.chunks == ((2, 2, 2, 4,),)
+
+
+def test_reshape_with_windows():
+    data = np.arange(36).reshape(6,6)
+    assert reshape_with_windows(data, (2,2)).shape == (3,2,3,2)
