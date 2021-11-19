@@ -7,6 +7,7 @@ from typing import (
     Any,
     Hashable,
     List,
+    Literal,
     Optional,
     Tuple,
     Union,
@@ -23,6 +24,8 @@ from dask.array import Array
 from numpy.typing import NDArray
 from xarray.core.utils import is_dict_like
 
+CHUNK_MODES = ("rechunk", "minimum")
+
 
 def multiscale(
     array: Any,
@@ -32,7 +35,7 @@ def multiscale(
     pad_mode: str = "crop",
     preserve_dtype: bool = True,
     chunks: Optional[Union[Sequence[int], Dict[Hashable, int]]] = None,
-    chunk_mode: str = "rechunk",
+    chunk_mode: Literal["rechunk", "minimum"] = "minimum",
     chained: bool = True,
 ) -> List[DataArray]:
     """
@@ -95,9 +98,8 @@ def multiscale(
 
 
     """
-    chunk_modes = ("rechunk", "minimum")
-    if chunk_mode not in chunk_modes:
-        raise ValueError(f"chunk_mode must be one of {chunk_modes}, not {chunk_mode}")
+    if chunk_mode not in CHUNK_MODES:
+        raise ValueError(f"chunk_mode must be one of {CHUNK_MODES}, not {chunk_mode}")
 
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
     normalized = normalize_array(array, scale_factors, pad_mode=None)
