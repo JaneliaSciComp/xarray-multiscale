@@ -27,10 +27,10 @@ Generate a lazy multiscale representation of a numpy array:
 .. code-block:: python
 
     from xarray_multiscale import multiscale
-    import numpy as np
+    from xarray_multiscale.reducers import windowed_mean
 
     data = np.arange(4)
-    multiscale(data, np.mean, (2,))
+    multiscale(data, windowed_mean, (2,))
 
 which returns this (a collection of DataArrays, each with decreasing size): 
 
@@ -53,7 +53,7 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
 .. code-block:: python
 
     from xarray_multiscale import multiscale
-    import numpy as np
+    from xarray_multiscale.reducers import windowed_mean
     from xarray import DataArray
 
     data = np.arange(16).reshape((4,4))
@@ -61,7 +61,7 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
               DataArray(np.arange(data.shape[0]), dims=('x',), attrs={'units' : 'm'}))
 
     dataarray = DataArray(data, coords)
-    multiscale(dataarray, np.mean, (2,2))
+    multiscale(dataarray, windowed_mean, (2,2))
 
 which returns this:
 
