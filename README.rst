@@ -16,7 +16,7 @@ Many image processing applications benefit from representing images at multiple 
 
 Implementation
 **************
-The top-level function `multiscale` takes two main arguments: data to be downscaled, and a reduction function. The reduction function can use any implementation but it should (eagerly) take array data and a tuple of scale factors as inputs and return downscaled data as an output. See examples of reduction functions in [xarray_multiscale.reducers](https://github.com/JaneliaSciComp/xarray-multiscale/blob/main/src/xarray_multiscale/reducers.py). 
+The top-level function `multiscale` takes two main arguments: data to be downscaled, and a reduction function. The reduction function can use any implementation but it should (eagerly) take array data and a tuple of scale factors as inputs and return downscaled data as an output. See examples of reduction functions in `xarray_multiscale.reducers <https://github.com/JaneliaSciComp/xarray-multiscale/blob/main/src/xarray_multiscale/reducers.py>`_.
 
 Note that the current implementation divides the input data into *contiguous* chunks. This means that attempting to use downscaling schemes based on sliding windowed smoothing will produce edge artifacts. Future versions of this package could enable applying the reduction function to *overlapping* chunks, which would enable more elaborate downscaling routines.
 
