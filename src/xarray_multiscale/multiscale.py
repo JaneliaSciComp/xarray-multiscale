@@ -297,7 +297,9 @@ def downscale(
         to_downscale.data, reduction, scale_factors, **kwargs
     )
     downscaled_coords = downscale_coords(to_downscale, scale_factors)
-    return DataArray(downscaled_data, downscaled_coords, attrs=array.attrs)
+    return DataArray(
+        downscaled_data, downscaled_coords, attrs=array.attrs, dims=array.dims
+    )
 
 
 def downscale_coords(
