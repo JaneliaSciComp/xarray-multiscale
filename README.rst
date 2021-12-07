@@ -16,7 +16,9 @@ Many image processing applications benefit from representing images at multiple 
 
 Implementation
 **************
-At the moment, this package generates an image pyramid by using the ``dask.array.coarsen`` (`docs <https://docs.dask.org/en/latest/array-api.html#dask.array.coarsen>`_) to apply a reducing function to contiguous, non-overlapping chunks of the input data. With this implementation, it is not possible to generate a "Gaussian" image pyramid (i.e., a sequence of images that are recursively smoothed with a Gaussian filter and then resampled) because this exceeds the capabilities of ``dask.array.coarsen``. Gaussian pyramid support might be added in the future.
+The top-level function `multiscale` takes two main arguments: data to be downscaled, and a reduction function. The reduction function can use any implementation but it should (eagerly) take array data and a tuple of scale factors as inputs and return downscaled data as an output. See examples of reduction functions in [xarray_multiscale.reducers](https://github.com/JaneliaSciComp/xarray-multiscale/blob/main/src/xarray_multiscale/reducers.py). 
+
+Note that the current implementation divides the input data into *contiguous* chunks. This means that attempting to use downscaling schemes based on sliding windowed smoothing will produce edge artifacts. Future versions of this package could enable applying the reduction function to *overlapping* chunks, which would enable more elaborate downscaling routines.
 
 
 Usage
