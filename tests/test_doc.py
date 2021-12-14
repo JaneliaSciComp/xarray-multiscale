@@ -5,6 +5,6 @@ import xarray as xr
 
 
 def test_xarray_example():
-    data = xr.DataArray(np.zeros((1024, 1024)), dims=list("xy"))
+    data = xr.DataArray(np.zeros((1024, 1024)), dims=("x", "y"))
     scaled_data = multiscale(data, windowed_mean, (2, 2))
-    assert len(scaled_data) == 11, "Incorret Amount of Arrays returnes"
+    assert len(scaled_data) == 11, "Incorrect number of arrays returned"
