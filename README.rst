@@ -16,7 +16,9 @@ Many image processing applications benefit from representing images at multiple 
 
 Implementation
 **************
-At the moment, this package generates an image pyramid by using the ``dask.array.coarsen`` (`docs <https://docs.dask.org/en/latest/array-api.html#dask.array.coarsen>`_) to apply a reducing function to contiguous, non-overlapping chunks of the input data. With this implementation, it is not possible to generate a "Gaussian" image pyramid (i.e., a sequence of images that are recursively smoothed with a Gaussian filter and then resampled) because this exceeds the capabilities of ``dask.array.coarsen``. Gaussian pyramid support might be added in the future.
+The top-level function `multiscale` takes two main arguments: data to be downscaled, and a reduction function. The reduction function can use any implementation but it should (eagerly) take array data and a tuple of scale factors as inputs and return downscaled data as an output. See examples of reduction functions in `xarray_multiscale.reducers <https://github.com/JaneliaSciComp/xarray-multiscale/blob/main/src/xarray_multiscale/reducers.py>`_.
+
+Note that the current implementation divides the input data into *contiguous* chunks. This means that attempting to use downscaling schemes based on sliding windowed smoothing will produce edge artifacts. Future versions of this package could enable applying the reduction function to *overlapping* chunks, which would enable more elaborate downscaling routines.
 
 
 Usage
@@ -27,10 +29,10 @@ Generate a lazy multiscale representation of a numpy array:
 .. code-block:: python
 
     from xarray_multiscale import multiscale
-    import numpy as np
+    from xarray_multiscale.reducers import windowed_mean
 
     data = np.arange(4)
-    multiscale(data, np.mean, (2,))
+    multiscale(data, windowed_mean, (2,))
 
 which returns this (a collection of DataArrays, each with decreasing size): 
 
@@ -53,7 +55,7 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
 .. code-block:: python
 
     from xarray_multiscale import multiscale
-    import numpy as np
+    from xarray_multiscale.reducers import windowed_mean
     from xarray import DataArray
 
     data = np.arange(16).reshape((4,4))
@@ -61,7 +63,7 @@ Generate a lazy multiscale representation of an ``xarray.DataArray``:
               DataArray(np.arange(data.shape[0]), dims=('x',), attrs={'units' : 'm'}))
 
     dataarray = DataArray(data, coords)
-    multiscale(dataarray, np.mean, (2,2))
+    multiscale(dataarray, windowed_mean, (2,2))
 
 which returns this:
 
