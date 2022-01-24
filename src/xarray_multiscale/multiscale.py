@@ -333,16 +333,14 @@ def get_downscale_depth(
 
     _scale_factors = np.array(scale_factors).astype("int")
     _shape = np.array(shape).astype("int")
-    if np.all(_scale_factors == 1):
-        result = 0
-    elif np.any(_scale_factors > _shape):
+    valid = (_scale_factors > 1)
+    if not valid.any():
         result = 0
     else:
         if pad:
-            depths = np.ceil(logn(shape, scale_factors)).astype("int")
+            depths = np.ceil(logn(_shape[valid], _scale_factors[valid])).astype("int")
         else:
-            lg = logn(shape, scale_factors)
-            depths = np.floor(logn(shape, scale_factors)).astype("int")
+            depths = np.floor(logn(_shape[valid], _scale_factors[valid])).astype("int")
         result = min(depths)
     return result
 
