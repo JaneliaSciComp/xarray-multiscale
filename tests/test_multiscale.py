@@ -12,7 +12,7 @@ from xarray_multiscale.multiscale import (
     ensure_minimum_chunks,
 )
 from xarray_multiscale.reducers import (
-    reshape_with_windows,
+    reshape_windowed,
     windowed_mean,
     windowed_mode,
 )
@@ -281,8 +281,3 @@ def test_align_chunks():
             4,
         ),
     )
-
-
-def test_reshape_with_windows():
-    data = np.arange(36).reshape(6, 6)
-    assert reshape_with_windows(data, (2, 2)).shape == (3, 2, 3, 2)
