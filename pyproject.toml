@@ -1,18 +1,18 @@
 [tool.poetry]
 name = "xarray-multiscale"
-version = "0.3.1"
+version = "0.3.2"
 description = ""
 authors = ["Davis Vann Bennett <davis.v.bennett@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<4"
-xarray = ">=0.17"
+xarray = ">=2022.03.0"
 mypy = "^0.790"
 scipy = "^1.5.4"
 numpy = "^1.19.4"
-dask = "^2022.2.1"
+dask = ">=2020.12.0"
 Jinja2 = "^3.0.3"
-distributed = "^2022.2.1"
+distributed = ">=2020.12.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"

@@ -88,11 +88,16 @@ which returns this:
 Development
 ***********
 
-This project is devloped using `poetry <https://python-poetry.org/>`_. After cloning this repo locally, run :code:`poetry install` to install local dependencies. For development within a conda environment, create a conda environment with :code:`poetry`, then install dependencies, e.g. :code:`conda create -n xarray-multiscale poetry -c conda-forge`, then run :code:`poetry install` in the root directory of this repo to install dependencies.
+This project is devloped using `poetry <https://python-poetry.org/>`_. To develop this codebase, clone the repo and run :code:`poetry install` to install local dependencies. 
 
-Tests are rudimentary and use :code:`pytest`.
+For development within a conda environment, create a conda environment with :code:`poetry`, then install dependencies, e.g. 
 
+.. code-block:: bash
 
-Caveats / alternatives
-**********************
-tbd
+    $ git clone https://github.com/d-v-b-/xarray-multiscale
+    $ conda create -n xarray-multiscale poetry -c conda-forge
+    $ conda activate xarray-multiscale
+    $ poetry install
+
+Run tests with ``pytest``
+
