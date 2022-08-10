@@ -5,16 +5,14 @@ description = ""
 authors = ["Davis Vann Bennett <davis.v.bennett@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<4"
+python = ">=3.8,<3.11"
 xarray = ">=2022.03.0"
-mypy = "^0.790"
 scipy = "^1.5.4"
 numpy = "^1.19.4"
 dask = ">=2020.12.0"
-Jinja2 = "^3.0.3"
-distributed = ">=2020.12.0"
 
 [tool.poetry.dev-dependencies]
+mypy = "^0.971"
 pytest = "^5.2"
 black = "^20.8b1"
 Sphinx = "^4.4.0"
@@ -22,6 +20,7 @@ sphinx-rtd-theme = "^1.0.0"
 numpydoc = "^1.2"
 sphinx-issues = "^3.0.1"
 isort = "^5.10.1"
+pytest-cov = "^3.0.0"
 
 [build-system]
 requires = ["poetry>=0.12"]
