@@ -39,3 +39,4 @@ MANIFEST.in
 /releases/*
 pip-wheel-metadata
 /poetry.toml
+/venv
