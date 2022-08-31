@@ -154,17 +154,17 @@ def test_multiscale():
     assert [p.shape for p in pyr_trimmed] == [shape, (4, 4, 4), (2, 2, 2), (1, 1, 1)]
 
     # check that the first multiscale array is identical to the input data
-    assert np.array_equal(pyr_padded[0].data.compute(), base_array)
-    assert np.array_equal(pyr_trimmed[0].data.compute(), base_array)
+    assert np.array_equal(pyr_padded[0].data, base_array)
+    assert np.array_equal(pyr_trimmed[0].data, base_array)
 
     assert np.array_equal(
-        pyr_trimmed[-2].data.mean().compute(), pyr_trimmed[-1].data.compute().mean()
+        pyr_trimmed[-2].data.mean(), pyr_trimmed[-1].data.mean()
     )
     assert np.array_equal(
-        pyr_trimmed_unchained[-2].data.mean().compute(),
-        pyr_trimmed_unchained[-1].data.compute().mean(),
+        pyr_trimmed_unchained[-2].data.mean(),
+        pyr_trimmed_unchained[-1].data.mean(),
     )
-    assert np.allclose(pyr_padded[0].data.mean().compute(), 0.17146776406035666)
+    assert np.allclose(pyr_padded[0].data.mean(), 0.17146776406035666)
 
 
 def test_chunking():

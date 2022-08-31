@@ -148,8 +148,10 @@ def multiscale(
 
     if preserve_dtype:
         result = [r.astype(array.dtype) for r in result]
-    new_chunks = [normalize_chunks(r, chunks, chunk_merge_only) for r in result]
-    result = [r.chunk(ch) for r, ch in zip(result, new_chunks)]
+
+    if normalized_array.chunks is not None:
+        new_chunks = [normalize_chunks(r, chunks, chunk_merge_only) for r in result]
+        result = [r.chunk(ch) for r, ch in zip(result, new_chunks)]
 
     return result
 
@@ -165,14 +167,14 @@ def normalize_array(
         # if the input is a xarray.DataArray
         # assign a new variable to the DataArray and use
         # `array` to refer to the data property of the input
-        data = da.asarray(array.data)
+        data = array.data
         dims = array.dims
         # ensure that key order matches dimension order
         coords = {d: array.coords[d] for d in dims}
         attrs = array.attrs
         name = array.name
     else:
-        data = da.asarray(array)
+        data = array
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
         offset = 0.0
         coords = {
@@ -226,9 +228,13 @@ def downscale(
 ) -> Any:
 
     to_downscale = normalize_array(array, scale_factors, pad_mode=pad_mode)
-    downscaled_data = downscale_dask(
-        to_downscale.data, reduction, scale_factors, **kwargs
-    )
+    if to_downscale.chunks is not None:
+        downscaled_data = downscale_dask(
+            to_downscale.data, reduction, scale_factors, **kwargs
+        )
+    else:
+        downscaled_data = reduction(to_downscale.data, scale_factors)
+
     downscaled_coords = downscale_coords(to_downscale, scale_factors)
     return DataArray(downscaled_data, downscaled_coords, attrs=array.attrs)
 
