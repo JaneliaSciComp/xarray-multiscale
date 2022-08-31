@@ -1,19 +1,22 @@
-from typing import Any, Dict, Protocol, Sequence, Tuple, cast
+from typing import Any, Protocol, Sequence, Tuple
 
-from numpy.typing import NDArray
+import numpy.typing as npt
 from scipy.stats import mode
 
 
 class WindowedReducer(Protocol):
     def __call__(
-        self, array: NDArray[Any], window_size: Sequence[int], **kwargs: Any
-    ) -> NDArray[Any]:
+        self,
+        array: npt.NDArray[Any],
+        window_size: Sequence[int],
+        **kwargs: Any
+    ) -> npt.NDArray[Any]:
         ...
 
 
 def windowed_mean(
-    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
+) -> npt.NDArray[Any]:
     """
     Compute the windowed mean of an array.
 
@@ -57,7 +60,8 @@ def windowed_mean(
     return result
 
 
-def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode(array: npt.NDArray[Any],
+                  window_size: Tuple[int, ...]) -> npt.NDArray[Any]:
     """
     Compute the windowed mode of an array. Input will be coerced to a numpy
     array.
@@ -99,11 +103,12 @@ def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[
     )
     transposed = reshaped.transpose(transposed_shape)
     collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
-    result = mode(collapsed, axis=collapsed.ndim - 1).mode.squeeze(axis=-1)
+    result = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
     return result
 
 
-def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[Any]:
+def reshape_windowed(array: npt.NDArray[Any],
+                     window_size: Tuple[int, ...]) -> npt.NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of

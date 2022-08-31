@@ -1,21 +1,15 @@
 import pytest
 from xarray_multiscale.multiscale import (
-    align_chunks,
     downscale,
-    broadcast_to_rank,
     adjust_shape,
     downscale_coords,
     downscale_dask,
     multiscale,
-    get_downscale_depth,
-    normalize_chunks,
-    ensure_minimum_chunks,
+    get_downscale_depth
 )
-from xarray_multiscale.reducers import (
-    reshape_windowed,
-    windowed_mean,
-    windowed_mode,
-)
+
+from xarray_multiscale.reducers import windowed_mean
+
 import dask.array as da
 import numpy as np
 from xarray import DataArray
@@ -81,7 +75,9 @@ def test_downscale_2d():
 
 
 def test_downscale_coords():
-    data = DataArray(np.zeros((10, 10)), dims=("x", "y"), coords={"x": np.arange(10)})
+    data = DataArray(np.zeros((10, 10)),
+                     dims=("x", "y"),
+                     coords={"x": np.arange(10)})
     scale_factors = (2, 1)
     downscaled = downscale_coords(data, scale_factors)
     answer = {"x": data["x"].coarsen({"x": scale_factors[0]}).mean()}
@@ -142,6 +138,7 @@ def test_multiscale():
     base_array = np.tile(cell, np.ceil(np.divide(shape, chunks)).astype("int"))[
         cropslice
     ]
+
     pyr_trimmed = multiscale(base_array, windowed_mean, 2, pad_mode="crop")
     pyr_padded = multiscale(base_array, windowed_mean, 2, pad_mode="constant")
     pyr_trimmed_unchained = multiscale(
@@ -185,7 +182,7 @@ def test_chunking():
         assert m.data.chunksize == chunks or m.data.chunksize == m.data.shape
 
     chunks = (3,) * ndim
-    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_mode="minimum")
+    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_merge_only=True)
     for m in multi:
         assert (
             np.greater_equal(m.data.chunksize, chunks).all()
@@ -193,33 +190,12 @@ def test_chunking():
         )
 
     chunks = 3
-    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_mode="minimum")
+    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_merge_only=True)
     for m in multi:
         assert (
             np.greater_equal(m.data.chunksize, (chunks,) * ndim).all()
             or m.data.chunksize == m.data.shape
         )
-
-
-def test_depth():
-    ndim = 3
-    shape = (16,) * ndim
-    base_array = np.zeros(shape)
-    reducer = windowed_mean
-    full = multiscale(base_array, reducer, 2, depth=-1)
-    assert len(full) == 5
-
-    partial = multiscale(base_array, reducer, 2, depth=-2)
-    assert len(partial) == len(full) - 1
-    [assert_equal(a, b) for a, b in zip(full, partial)]
-
-    partial = multiscale(base_array, reducer, 2, depth=2)
-    assert len(partial) == 3
-    [assert_equal(a, b) for a, b in zip(full, partial)]
-
-    partial = multiscale(base_array, reducer, 2, depth=0)
-    assert len(partial) == 1
-    [assert_equal(a, b) for a, b in zip(full, partial)]
 
 
 def test_coords():
@@ -242,42 +218,4 @@ def test_coords():
     assert_equal(multi[1], downscaled)
 
 
-def test_normalize_chunks():
-    data = DataArray(da.zeros((4, 6), chunks=(1, 1)))
-    assert normalize_chunks(data, {"dim_0": 2, "dim_1": 1}) == (2, 1)
 
-
-def test_ensure_minimum_chunks():
-    data = da.zeros((4, 6), chunks=(1, 1))
-    assert ensure_minimum_chunks(data, (2, 2)) == (2, 2)
-
-    data = da.zeros((4, 6), chunks=(4, 1))
-    assert ensure_minimum_chunks(data, (2, 2)) == (4, 2)
-
-
-def test_broadcast_to_rank():
-    assert broadcast_to_rank(2, 1) == (2,)
-    assert broadcast_to_rank(2, 2) == (2, 2)
-    assert broadcast_to_rank((2, 3), 2) == (2, 3)
-    assert broadcast_to_rank({0: 2}, 3) == (2, 1, 1)
-
-
-def test_align_chunks():
-    data = da.arange(10, chunks=1)
-    rechunked = align_chunks(data, scale_factors=(2,))
-    assert rechunked.chunks == ((2,) * 5,)
-
-    data = da.arange(10, chunks=2)
-    rechunked = align_chunks(data, scale_factors=(2,))
-    assert rechunked.chunks == ((2,) * 5,)
-
-    data = da.arange(10, chunks=(1, 1, 3, 5))
-    rechunked = align_chunks(data, scale_factors=(2,))
-    assert rechunked.chunks == (
-        (
-            2,
-            2,
-            2,
-            4,
-        ),
-    )

@@ -15,7 +15,7 @@ _build
 pip-log.txt
 
 # Unit test / coverage reports
-.coverage
+.coverage*
 .tox
 .pytest_cache
 
@@ -39,3 +39,6 @@ MANIFEST.in
 /releases/*
 pip-wheel-metadata
 /poetry.toml
+
+# numba
+*/__pycache__/*
