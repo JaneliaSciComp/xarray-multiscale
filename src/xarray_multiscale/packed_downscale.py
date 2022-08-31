@@ -1,9 +1,10 @@
 import numba as nb
 import numpy as np
+from typing import Tuple
 
 
 @nb.njit
-def index_to_coords(idx, shape):
+def index_to_coords(idx: int, shape: Tuple[int]):
     ndim = len(shape)
     result = np.zeros(ndim, dtype="int")
     init = idx
@@ -16,7 +17,7 @@ def index_to_coords(idx, shape):
 
 
 @nb.njit
-def make_strides(shape):
+def make_strides(shape: Tuple[int]):
     ndim = len(shape)
     result = np.ones(ndim, dtype="int")
     for d in range(ndim - 2, -1, -1):
@@ -25,7 +26,7 @@ def make_strides(shape):
 
 
 @nb.njit
-def create_stencil(array_shape, region_shape):
+def create_stencil(array_shape: Tuple[int], region_shape: Tuple[int]):
     ndim = len(array_shape)
 
     result_shape = 1
@@ -51,7 +52,7 @@ def mean_reduction(v):
 
 
 @nb.jit
-def reduce(arr, region_shape, reduction):
+def reduce(arr, region_shape: Tuple[int], reduction):
     array_shape = np.array(arr.shape)
     region_shape = np.array(region_shape)
     region_size = np.prod(region_shape)
@@ -78,9 +79,3 @@ def reduce(arr, region_shape, reduction):
         output[idx] = reduction(flat[stencil + stencil_shift])
 
     return output
-
-
-if __name__ == "__main__":
-    data = np.arange(8**2).reshape((8,) * 2)
-    region_shape = (2, 2)
-    print(reduce(data, region_shape, mean_reduction))
