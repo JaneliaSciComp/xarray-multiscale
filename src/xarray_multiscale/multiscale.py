@@ -10,9 +10,8 @@ from typing import (
     Union,
 )
 
-import dask.array as da
 import numpy as np
-from dask.array import Array
+from dask.array.core import Array
 from dask.base import tokenize
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
@@ -38,7 +37,7 @@ def multiscale(
     chained: bool = True,
 ) -> List[DataArray]:
     """
-    Generate a lazy, coordinate-aware multiscale representation of an array.
+    Generate a coordinate-aware multiscale representation of an array.
 
     Parameters
     ----------
@@ -114,16 +113,16 @@ def multiscale(
     >>> from xarray_multiscale import multiscale
     >>> from xarray_multiscale.reducers import windowed_mean
     >>> multiscale(np.arange(4), windowed_mean, 2)
-    [<xarray.DataArray 'array-3fddd342b603c7121f36e43be77be0cf' (dim_0: 4)>
-    dask.array<array, shape=(4,), dtype=int64, chunksize=(4,), chunktype=numpy.ndarray>
+    [<xarray.DataArray (dim_0: 4)>
+    array([0, 1, 2, 3])
     Coordinates:
-    * dim_0    (dim_0) float64 0.0 1.0 2.0 3.0, <xarray.DataArray 'downscale-f8b482b55696e22c132f3c9b8d583090' (dim_0: 2)>
-    dask.array<astype, shape=(2,), dtype=int64, chunksize=(2,), chunktype=numpy.ndarray>
+      * dim_0    (dim_0) float64 0.0 1.0 2.0 3.0, <xarray.DataArray (dim_0: 2)>
+    array([0, 2])
     Coordinates:
-    * dim_0    (dim_0) float64 0.5 2.5, <xarray.DataArray 'downscale-8b8e1406654a7ef2394a47a0f32054db' (dim_0: 1)>
-    dask.array<astype, shape=(1,), dtype=int64, chunksize=(1,), chunktype=numpy.ndarray>
+      * dim_0    (dim_0) float64 0.5 2.5, <xarray.DataArray (dim_0: 1)>
+    array([1])
     Coordinates:
-    * dim_0    (dim_0) float64 1.5]
+      * dim_0    (dim_0) float64 1.5]
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
     normalized_array = normalize_array(array, scale_factors, pad_mode=None)
@@ -202,7 +201,7 @@ def downscale_dask(
         )
 
     array = align_chunks(array, scale_factors)
-    name = "downscale-" + tokenize(reduction, array, scale_factors)
+    name: str = "downscale-" + tokenize(reduction, array, scale_factors)
     dsk = {
         (name,) + key[1:]: (apply, reduction, [key, scale_factors], kwargs)
         for key in flatten(array.__dask_keys__())
