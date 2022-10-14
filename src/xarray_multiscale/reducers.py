@@ -6,10 +6,7 @@ from scipy.stats import mode
 
 class WindowedReducer(Protocol):
     def __call__(
-        self,
-        array: npt.NDArray[Any],
-        window_size: Sequence[int],
-        **kwargs: Any
+        self, array: npt.NDArray[Any], window_size: Sequence[int], **kwargs: Any
     ) -> npt.NDArray[Any]:
         ...
 
@@ -60,8 +57,9 @@ def windowed_mean(
     return result
 
 
-def windowed_mode(array: npt.NDArray[Any],
-                  window_size: Tuple[int, ...]) -> npt.NDArray[Any]:
+def windowed_mode(
+    array: npt.NDArray[Any], window_size: Tuple[int, ...]
+) -> npt.NDArray[Any]:
     """
     Compute the windowed mode of an array. Input will be coerced to a numpy
     array.
@@ -107,8 +105,9 @@ def windowed_mode(array: npt.NDArray[Any],
     return result
 
 
-def reshape_windowed(array: npt.NDArray[Any],
-                     window_size: Tuple[int, ...]) -> npt.NDArray[Any]:
+def reshape_windowed(
+    array: npt.NDArray[Any], window_size: Tuple[int, ...]
+) -> npt.NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of

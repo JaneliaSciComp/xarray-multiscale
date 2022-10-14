@@ -128,9 +128,7 @@ def multiscale(
     normalized_array = normalize_array(array, scale_factors, pad_mode=None)
     do_padding = not (pad_mode == "crop")
     levels = range(
-        get_downscale_depth(normalized_array.shape,
-                            scale_factors,
-                            pad=do_padding)
+        get_downscale_depth(normalized_array.shape, scale_factors, pad=do_padding)
     )
     scales = tuple(tuple(s**level for s in scale_factors) for level in levels)
     result = []
