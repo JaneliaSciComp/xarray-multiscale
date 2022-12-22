@@ -4,7 +4,7 @@ import numpy as np
 
 
 def adjust_shape(
-    array: DataArray, scale_factors: Sequence[int], mode: Union[str, None]
+    array: DataArray, scale_factors: Sequence[int]
 ) -> DataArray:
     """
     Pad or crop array such that its new dimensions are evenly
@@ -21,33 +21,15 @@ def adjust_shape(
         that are smaller than or equal to the scale factor
         (if the array has chunks)
 
-    mode : str
-        If set to "crop", then the input array will be cropped as needed.
-        Otherwise, this is the edge mode used by the padding routine.
-        This parameter will be passed to `dask.array.pad` as the `mode`
-        keyword.
-
     Returns
     -------
-    dask array
+    DataArray
     """
     result = array
     misalignment = np.any(np.mod(array.shape, scale_factors))
-    if misalignment and (mode is not None):
-        if mode == "crop":
-            new_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
-            result = array.isel({d: slice(s) for d, s in zip(array.dims, new_shape)})
-        else:
-            new_shape = np.add(
-                array.shape,
-                np.subtract(scale_factors, np.mod(array.shape, scale_factors)),
-            )
-            pw = {
-                dim: (0, int(new - old))
-                for dim, new, old in zip(array.dims, new_shape, array.shape)
-                if old != new
-            }
-            result = array.pad(pad_width=pw, mode=mode)
+    if misalignment:
+        new_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
+        result = array.isel({d: slice(s) for d, s in zip(array.dims, new_shape)})
     return result
 
 

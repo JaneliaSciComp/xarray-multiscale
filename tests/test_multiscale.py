@@ -25,29 +25,17 @@ def test_downscale_depth():
     assert get_downscale_depth((4, 4, 4), (2, 2, 2)) == 2
     assert get_downscale_depth((4, 2, 2), (2, 2, 2)) == 1
     assert get_downscale_depth((5, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((5, 3, 3), (2, 2, 2), pad=True) == 2
     assert get_downscale_depth((7, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((7, 3, 3), (2, 2, 2), pad=True) == 2
     assert get_downscale_depth((1500, 5495, 5200), (2, 2, 2)) == 10
 
 
 @pytest.mark.parametrize(("size", "scale"), ((10, 2), (11, 2), ((10, 11), (2, 3))))
 def test_adjust_shape(size, scale):
     arr = DataArray(np.zeros(size))
-    padded = adjust_shape(arr, scale, mode="constant")
     scale_array = np.array(scale)
     old_shape_array = np.array(arr.shape)
-    new_shape_array = np.array(padded.shape)
 
-    if np.all((old_shape_array % scale_array) == 0):
-        assert np.array_equal(new_shape_array, old_shape_array)
-    else:
-        assert np.array_equal(
-            new_shape_array,
-            old_shape_array + ((scale_array - (old_shape_array % scale_array))),
-        )
-
-    cropped = adjust_shape(arr, scale, mode="crop")
+    cropped = adjust_shape(arr, scale)
     new_shape_array = np.array(cropped.shape)
     if np.all((old_shape_array % scale_array) == 0):
         assert np.array_equal(new_shape_array, old_shape_array)
@@ -70,7 +58,7 @@ def test_downscale_2d():
         )
     )
     answer = DataArray(np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]))
-    downscaled = downscale(data, windowed_mean, scale, pad_mode="crop").compute()
+    downscaled = downscale(data, windowed_mean, scale).compute()
     assert np.array_equal(downscaled, answer)
 
 
@@ -139,32 +127,23 @@ def test_multiscale():
         cropslice
     ]
 
-    pyr_trimmed = multiscale(base_array, windowed_mean, 2, pad_mode="crop")
-    pyr_padded = multiscale(base_array, windowed_mean, 2, pad_mode="constant")
-    pyr_trimmed_unchained = multiscale(
-        base_array, windowed_mean, 2, pad_mode="crop", chained=False
+    pyr = multiscale(base_array, windowed_mean, 2)
+    pyr_unchained = multiscale(
+        base_array, windowed_mean, 2, chained=False
     )
-    assert [p.shape for p in pyr_padded] == [
-        shape,
-        (5, 5, 5),
-        (3, 3, 3),
-        (2, 2, 2),
-        (1, 1, 1),
-    ]
-    assert [p.shape for p in pyr_trimmed] == [shape, (4, 4, 4), (2, 2, 2), (1, 1, 1)]
+    assert [p.shape for p in pyr] == [(8, 8, 8), (4, 4, 4), (2, 2, 2)]
 
     # check that the first multiscale array is identical to the input data
-    assert np.array_equal(pyr_padded[0].data, base_array)
-    assert np.array_equal(pyr_trimmed[0].data, base_array)
+    # up to the trimmed edges
+    assert np.array_equal(pyr[0].data, base_array[tuple(slice(s) for s in pyr[0].data.shape)])
 
     assert np.array_equal(
-        pyr_trimmed[-2].data.mean(), pyr_trimmed[-1].data.mean()
+        pyr[-2].data.mean(), pyr[-1].data.mean()
     )
     assert np.array_equal(
-        pyr_trimmed_unchained[-2].data.mean(),
-        pyr_trimmed_unchained[-1].data.mean(),
+        pyr_unchained[-2].data.mean(),
+        pyr_unchained[-1].data.mean(),
     )
-    assert np.allclose(pyr_padded[0].data.mean(), 0.17146776406035666)
 
 
 def test_chunking():
@@ -182,7 +161,7 @@ def test_chunking():
         assert m.data.chunksize == chunks or m.data.chunksize == m.data.shape
 
     chunks = (3,) * ndim
-    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_merge_only=True)
+    multi = multiscale(base_array, reducer, 2, chunks=chunks)
     for m in multi:
         assert (
             np.greater_equal(m.data.chunksize, chunks).all()
@@ -190,7 +169,7 @@ def test_chunking():
         )
 
     chunks = 3
-    multi = multiscale(base_array, reducer, 2, chunks=chunks, chunk_merge_only=True)
+    multi = multiscale(base_array, reducer, 2, chunks=chunks)
     for m in multi:
         assert (
             np.greater_equal(m.data.chunksize, (chunks,) * ndim).all()
