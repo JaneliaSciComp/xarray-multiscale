@@ -5,7 +5,7 @@ from xarray_multiscale.multiscale import (
     downscale_coords,
     downscale_dask,
     multiscale,
-    get_downscale_depth
+    get_downscale_depth,
 )
 
 from xarray_multiscale.reducers import windowed_mean
@@ -63,9 +63,7 @@ def test_downscale_2d():
 
 
 def test_downscale_coords():
-    data = DataArray(np.zeros((10, 10)),
-                     dims=("x", "y"),
-                     coords={"x": np.arange(10)})
+    data = DataArray(np.zeros((10, 10)), dims=("x", "y"), coords={"x": np.arange(10)})
     scale_factors = (2, 1)
     downscaled = downscale_coords(data, scale_factors)
     answer = {"x": data["x"].coarsen({"x": scale_factors[0]}).mean()}
@@ -128,18 +126,16 @@ def test_multiscale():
     ]
 
     pyr = multiscale(base_array, windowed_mean, 2)
-    pyr_unchained = multiscale(
-        base_array, windowed_mean, 2, chained=False
-    )
+    pyr_unchained = multiscale(base_array, windowed_mean, 2, chained=False)
     assert [p.shape for p in pyr] == [(8, 8, 8), (4, 4, 4), (2, 2, 2)]
 
     # check that the first multiscale array is identical to the input data
     # up to the trimmed edges
-    assert np.array_equal(pyr[0].data, base_array[tuple(slice(s) for s in pyr[0].data.shape)])
-
     assert np.array_equal(
-        pyr[-2].data.mean(), pyr[-1].data.mean()
+        pyr[0].data, base_array[tuple(slice(s) for s in pyr[0].data.shape)]
     )
+
+    assert np.array_equal(pyr[-2].data.mean(), pyr[-1].data.mean())
     assert np.array_equal(
         pyr_unchained[-2].data.mean(),
         pyr_unchained[-1].data.mean(),
@@ -195,6 +191,3 @@ def test_coords():
 
     assert_equal(multi[0], dataarray)
     assert_equal(multi[1], downscaled)
-
-
-

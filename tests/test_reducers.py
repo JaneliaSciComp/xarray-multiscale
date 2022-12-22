@@ -30,4 +30,4 @@ def test_reshape_windowed():
     window = (2, 2)
     windowed = reshape_windowed(data, window)
     assert windowed.shape == (3, 2, 3, 2)
-    assert np.all(windowed[0, :, 0, :] == data[:window[0], :window[1]])
+    assert np.all(windowed[0, :, 0, :] == data[: window[0], : window[1]])

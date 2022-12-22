@@ -8,7 +8,7 @@ import toolz as tz
 
 def normalize_chunks(
     array: xarray.DataArray,
-    chunk_size: Union[str, int, Sequence[int], Dict[Hashable, int]]
+    chunk_size: Union[str, int, Sequence[int], Dict[Hashable, int]],
 ) -> Dict[Hashable, int]:
 
     if not isinstance(chunk_size, (int, str, dict)):

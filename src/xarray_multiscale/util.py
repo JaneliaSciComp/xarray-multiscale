@@ -3,9 +3,7 @@ from typing import Sequence, Union, Tuple, Dict
 import numpy as np
 
 
-def adjust_shape(
-    array: DataArray, scale_factors: Sequence[int]
-) -> DataArray:
+def adjust_shape(array: DataArray, scale_factors: Sequence[int]) -> DataArray:
     """
     Pad or crop array such that its new dimensions are evenly
     divisible by a set of integers.

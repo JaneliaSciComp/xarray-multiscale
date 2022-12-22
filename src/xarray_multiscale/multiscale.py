@@ -50,8 +50,8 @@ def multiscale(
         If a single int is provide, it will be broadcasted to all axes.
 
     preserve_dtype : bool, default=True
-        If True, output arrays are all cast to the same data type as the input array. 
-        If False, output arrays will have data type determined by the output of the 
+        If True, output arrays are all cast to the same data type as the input array.
+        If False, output arrays will have data type determined by the output of the
         reduction function.
 
     chunks : sequence or dict of ints, or the string "auto" (default)
@@ -102,9 +102,7 @@ def multiscale(
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
     normalized_array = normalize_array(array, scale_factors)
-    levels = range(
-        get_downscale_depth(normalized_array.shape, scale_factors) - 1
-    )
+    levels = range(get_downscale_depth(normalized_array.shape, scale_factors) - 1)
     scales = tuple(tuple(s**level for s in scale_factors) for level in levels)
     result = []
     for level in levels:
@@ -128,9 +126,7 @@ def multiscale(
     return result
 
 
-def normalize_array(
-    array: Any, scale_factors: Sequence[int]
-) -> DataArray:
+def normalize_array(array: Any, scale_factors: Sequence[int]) -> DataArray:
     """
     Ingest an array in preparation for downscaling by converting to DataArray
     and trimming as needed.
@@ -225,16 +221,15 @@ def downscale_coords(
     return new_coords
 
 
-def get_downscale_depth(
-    shape: Sequence[int], scale_factors: Sequence[int]) -> int:
+def get_downscale_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> int:
     """
     For a shape and a sequence of scale factors, calculate the
-    number of downsampling operations that must be performed to produce 
-    an downsampled shape with at least one singleton value.  
-    
+    number of downsampling operations that must be performed to produce
+    an downsampled shape with at least one singleton value.
+
     If any element of `scale_factors` is greater than the
     corresponding shape, this function returns 0.
-    
+
     If all `scale_factors` are 1, this function returns 0.
 
     Parameters

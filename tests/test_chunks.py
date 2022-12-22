@@ -7,13 +7,13 @@ def test_normalize_chunks():
     data1 = DataArray(da.zeros((4, 6), chunks=(1, 1)))
     assert normalize_chunks(data1, {"dim_0": 2, "dim_1": 1}) == {"dim_0": 2, "dim_1": 1}
 
-    data2 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=('a', 'b'))
+    data2 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=("a", "b"))
     assert normalize_chunks(data2, {"a": 2, "b": 1}) == {"a": 2, "b": 1}
 
-    data3 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=('a', 'b'))
+    data3 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=("a", "b"))
     assert normalize_chunks(data3, {"a": -1, "b": -1}) == {"a": 4, "b": 6}
 
-    data4 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=('a', 'b'))
+    data4 = DataArray(da.zeros((4, 6), chunks=(1, 1)), dims=("a", "b"))
     assert normalize_chunks(data4, {"a": -1}) == {"a": 4, "b": 1}
 
 
