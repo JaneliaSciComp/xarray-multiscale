@@ -15,7 +15,7 @@ _build
 pip-log.txt
 
 # Unit test / coverage reports
-.coverage
+.coverage*
 .tox
 .pytest_cache
 

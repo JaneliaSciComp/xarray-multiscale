@@ -1,11 +1,11 @@
+import math
+from functools import reduce
+from itertools import combinations
 from typing import Any, Dict, Protocol, Sequence, Tuple, cast
 
+import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import mode
-from itertools import combinations
-from functools import reduce
-import numpy as np
-import math
 
 
 class WindowedReducer(Protocol):
@@ -15,8 +15,7 @@ class WindowedReducer(Protocol):
         ...
 
 
-def reshape_windowed(array: NDArray[Any],
-                     window_size: Tuple[int]) -> NDArray[Any]:
+def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of
@@ -100,8 +99,7 @@ def windowed_mean(
     return result
 
 
-def windowed_mode(array: NDArray[Any],
-                  window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
 
     """
     Compute the windowed mode of an array using either
@@ -146,8 +144,9 @@ def windowed_mode(array: NDArray[Any],
         return windowed_mode_scipy(array, window_size)
 
 
-def windowed_mode_scipy(array: NDArray[Any],
-                        window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode_scipy(
+    array: NDArray[Any], window_size: Tuple[int, ...]
+) -> NDArray[Any]:
     """
     Compute the windowed mode of an array using scipy.stats.mode.
     Input will be coerced to a numpy array.
@@ -192,8 +191,9 @@ def windowed_mode_scipy(array: NDArray[Any],
     return result
 
 
-def windowed_mode_countless(array: NDArray[Any],
-                            window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode_countless(
+    array: NDArray[Any], window_size: Tuple[int, ...]
+) -> NDArray[Any]:
     """
     countless downsamples labeled images (segmentations)
     by finding the mode using vectorized instructions.

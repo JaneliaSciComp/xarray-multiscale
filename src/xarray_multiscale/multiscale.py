@@ -149,7 +149,7 @@ def multiscale(
         indexer = slice(depth + 1)
 
     levels = all_levels[indexer]
-    scales = tuple(tuple(s ** level for s in scale_factors) for level in levels)
+    scales = tuple(tuple(s**level for s in scale_factors) for level in levels)
     result = [normalized]
 
     if len(levels) > 1:
