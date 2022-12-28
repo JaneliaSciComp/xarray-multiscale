@@ -1,6 +1,7 @@
-from xarray_multiscale.chunks import align_chunks, normalize_chunks
-from xarray import DataArray
 import dask.array as da
+from xarray import DataArray
+
+from xarray_multiscale.chunks import align_chunks, normalize_chunks
 
 
 def test_normalize_chunks():

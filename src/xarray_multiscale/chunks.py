@@ -1,9 +1,10 @@
-from dask.array.routines import aligned_coarsen_chunks
-import xarray
-from xarray.core.utils import is_dict_like
-from typing import Union, Sequence, Hashable, Dict, Set
+from typing import Dict, Hashable, Sequence, Set, Union
+
 import dask.array as da
 import toolz as tz
+import xarray
+from dask.array.routines import aligned_coarsen_chunks
+from xarray.core.utils import is_dict_like
 
 
 def normalize_chunks(

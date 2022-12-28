@@ -1,6 +1,7 @@
-from xarray import DataArray
-from typing import Sequence, Union, Tuple, Dict
+from typing import Dict, Sequence, Tuple, Union
+
 import numpy as np
+from xarray import DataArray
 
 
 def adjust_shape(array: DataArray, scale_factors: Sequence[int]) -> DataArray:

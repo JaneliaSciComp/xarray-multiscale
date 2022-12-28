@@ -1,16 +1,8 @@
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Hashable,
-    List,
-    Literal,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import (Any, Callable, Dict, Hashable, List, Literal, Sequence,
+                    Tuple, Union)
 
 import numpy as np
+import numpy.typing as npt
 from dask.array.core import Array
 from dask.base import tokenize
 from dask.core import flatten
@@ -18,10 +10,9 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.utils import apply
 from xarray import DataArray
 
+from xarray_multiscale.chunks import align_chunks, normalize_chunks
 from xarray_multiscale.reducers import WindowedReducer
-from xarray_multiscale.util import broadcast_to_rank, adjust_shape, logn
-from xarray_multiscale.chunks import normalize_chunks, align_chunks
-import numpy.typing as npt
+from xarray_multiscale.util import adjust_shape, broadcast_to_rank, logn
 
 
 def multiscale(
@@ -200,7 +191,9 @@ def downscale(
         downscaled_data = reduction(to_downscale.data, scale_factors)
 
     downscaled_coords = downscale_coords(to_downscale, scale_factors)
-    return DataArray(downscaled_data, downscaled_coords, attrs=array.attrs)
+    return DataArray(
+        downscaled_data, downscaled_coords, attrs=array.attrs, dims=array.dims
+    )
 
 
 def downscale_coords(

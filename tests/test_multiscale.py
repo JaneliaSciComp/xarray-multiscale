@@ -1,19 +1,13 @@
-import pytest
-from xarray_multiscale.multiscale import (
-    downscale,
-    adjust_shape,
-    downscale_coords,
-    downscale_dask,
-    multiscale,
-    get_downscale_depth,
-)
-
-from xarray_multiscale.reducers import windowed_mean
-
 import dask.array as da
 import numpy as np
+import pytest
 from xarray import DataArray
 from xarray.testing import assert_equal
+
+from xarray_multiscale.multiscale import (adjust_shape, downscale,
+                                          downscale_coords, downscale_dask,
+                                          get_downscale_depth, multiscale)
+from xarray_multiscale.reducers import windowed_mean
 
 
 def test_downscale_depth():
