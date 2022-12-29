@@ -37,21 +37,23 @@ def multiscale(
         signature of this callable.
 
     scale_factors : int or sequence of ints
-        The desired downscaling factors, one for each axis.
-        If a single int is provide, it will be broadcasted to all axes.
+        The desired downscaling factors, one for each axis, or a single
+        value for all axes.
 
     preserve_dtype : bool, default=True
-        If True, output arrays are all cast to the same data type as the input array.
-        If False, output arrays will have data type determined by the output of the
-        reduction function.
+        If True, output arrays are all cast to the same data type as the
+        input array. If False, output arrays will have data type determined
+        by the output of the reduction function.
 
     chunks : sequence or dict of ints, or the string "auto" (default)
-        Set the chunking of the output arrays.
+        Set the chunking of the output arrays. Applies only to dask arrays.
         If `chunks` is set to "auto" (the default), then chunk sizes will
-        decrease with each level of downsampling. Otherwise,
-        this keyword argument will be passed to the `xarray.DataArray.chunk`
-        method for each output array, producing a list of arrays with the same
-        chunk size. Note that rechunking can be computationally expensive
+        decrease with each level of downsampling.
+
+        Otherwise, this keyword argument will be passed to the
+        `xarray.DataArray.chunk` method for each output array,
+        producing a list of arrays with the same chunk size.
+        Note that rechunking can be computationally expensive
         for arrays with many chunks.
 
     chained : bool, default=True
@@ -86,16 +88,16 @@ def multiscale(
       * dim_0    (dim_0) float64 0.0 1.0 2.0 3.0, <xarray.DataArray (dim_0: 2)>
     array([0, 2])
     Coordinates:
-      * dim_0    (dim_0) float64 0.5 2.5, <xarray.DataArray (dim_0: 1)>
-    array([1])
-    Coordinates:
-      * dim_0    (dim_0) float64 1.5]
+      * dim_0    (dim_0) float64 0.5 2.5]
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
     normalized_array = normalize_array(array, scale_factors)
-    levels = range(get_downscale_depth(normalized_array.shape, scale_factors) - 1)
+    # the depth - 1 here prevents getting arrays with a singleton dimension size
+    levels = range(
+        downsampling_depth(normalized_array.shape, scale_factors) - 1
+        )
     scales = tuple(tuple(s**level for s in scale_factors) for level in levels)
-    result = []
+    result: List[DataArray] = []
     for level in levels:
         if level == 0:
             result.append(normalized_array)
@@ -105,10 +107,7 @@ def multiscale(
         else:
             scale = scales[level]
             source = result[0]
-        result.append(downscale(source, reduction, scale))
-
-    if preserve_dtype:
-        result = [r.astype(normalized_array.dtype) for r in result]
+        result.append(downscale(source, reduction, scale, preserve_dtype))
 
     if normalized_array.chunks is not None:
         new_chunks = [normalize_chunks(r, chunks) for r in result]
@@ -179,6 +178,7 @@ def downscale(
     array: DataArray,
     reduction: WindowedReducer,
     scale_factors: Sequence[int],
+    preserve_dtype: bool = True,
     **kwargs: Any,
 ) -> Any:
 
@@ -189,7 +189,8 @@ def downscale(
         )
     else:
         downscaled_data = reduction(to_downscale.data, scale_factors)
-
+    if preserve_dtype:
+        downscaled_data = downscaled_data.astype(array.dtype)
     downscaled_coords = downscale_coords(to_downscale, scale_factors)
     return DataArray(
         downscaled_data, downscaled_coords, attrs=array.attrs, dims=array.dims
@@ -214,11 +215,11 @@ def downscale_coords(
     return new_coords
 
 
-def get_downscale_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> int:
+def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> int:
     """
     For a shape and a sequence of scale factors, calculate the
     number of downsampling operations that must be performed to produce
-    an downsampled shape with at least one singleton value.
+    a downsampled shape with at least one singleton value.
 
     If any element of `scale_factors` is greater than the
     corresponding shape, this function returns 0.
@@ -233,11 +234,11 @@ def get_downscale_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> i
 
     Examples
     --------
-    >>> get_downscale_depth((8,), (2,))
+    >>> downsampling_depth((8,), (2,))
     3
-    >>> get_downscale_depth((8,2), (2,2))
+    >>> downsampling_depth((8,2), (2,2))
     1
-    >>> get_downscale_depth((7,), (2,))
+    >>> downsampling_depth((7,), (2,))
     2
     """
     if len(shape) != len(scale_factors):

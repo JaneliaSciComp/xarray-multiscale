@@ -4,23 +4,28 @@ import pytest
 from xarray import DataArray
 from xarray.testing import assert_equal
 
-from xarray_multiscale.multiscale import (adjust_shape, downscale,
-                                          downscale_coords, downscale_dask,
-                                          get_downscale_depth, multiscale)
+from xarray_multiscale.multiscale import (
+    adjust_shape,
+    downscale,
+    downscale_coords,
+    downscale_dask,
+    downsampling_depth,
+    multiscale,
+)
 from xarray_multiscale.reducers import windowed_mean
 
 
 def test_downscale_depth():
-    assert get_downscale_depth((1,), (1,)) == 0
-    assert get_downscale_depth((2,), (3,)) == 0
-    assert get_downscale_depth((2, 1), (2, 1)) == 1
-    assert get_downscale_depth((2, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((1, 2, 2), (2, 2, 2)) == 0
-    assert get_downscale_depth((4, 4, 4), (2, 2, 2)) == 2
-    assert get_downscale_depth((4, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((5, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((7, 2, 2), (2, 2, 2)) == 1
-    assert get_downscale_depth((1500, 5495, 5200), (2, 2, 2)) == 10
+    assert downsampling_depth((1,), (1,)) == 0
+    assert downsampling_depth((2,), (3,)) == 0
+    assert downsampling_depth((2, 1), (2, 1)) == 1
+    assert downsampling_depth((2, 2, 2), (2, 2, 2)) == 1
+    assert downsampling_depth((1, 2, 2), (2, 2, 2)) == 0
+    assert downsampling_depth((4, 4, 4), (2, 2, 2)) == 2
+    assert downsampling_depth((4, 2, 2), (2, 2, 2)) == 1
+    assert downsampling_depth((5, 2, 2), (2, 2, 2)) == 1
+    assert downsampling_depth((7, 2, 2), (2, 2, 2)) == 1
+    assert downsampling_depth((1500, 5495, 5200), (2, 2, 2)) == 10
 
 
 @pytest.mark.parametrize(("size", "scale"), ((10, 2), (11, 2), ((10, 11), (2, 3))))
@@ -40,20 +45,21 @@ def test_adjust_shape(size, scale):
 
 
 def test_downscale_2d():
-    chunks = (2, 2)
     scale = (2, 1)
 
     data = DataArray(
-        da.from_array(
-            np.array(
-                [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
-            ),
-            chunks=chunks,
-        )
+        np.array(
+            [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
+        ),
     )
     answer = DataArray(np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]))
-    downscaled = downscale(data, windowed_mean, scale).compute()
+    downscaled = downscale(data, windowed_mean, scale, preserve_dtype=False)
+    downscaled_old_dtype = downscale(data, windowed_mean, scale, preserve_dtype=True)
     assert np.array_equal(downscaled, answer)
+    assert np.array_equal(
+        downscaled_old_dtype,
+        answer.astype(data.dtype),
+    )
 
 
 def test_downscale_coords():
@@ -178,10 +184,10 @@ def test_coords():
         (d, sc * (np.arange(shp) + tr))
         for d, sc, shp, tr in zip(dims, scales, base_array.shape, translates)
     )
-    dataarray = DataArray(base_array, coords=coords)
-    downscaled = dataarray.coarsen({"z": 2, "y": 2, "x": 2}).mean()
+    array = DataArray(base_array, coords=coords)
+    downscaled = array.coarsen({"z": 2, "y": 2, "x": 2}).mean()
 
-    multi = multiscale(dataarray, windowed_mean, (2, 2, 2), preserve_dtype=False)
+    multi = multiscale(array, windowed_mean, (2, 2, 2), preserve_dtype=False)
 
-    assert_equal(multi[0], dataarray)
+    assert_equal(multi[0], array)
     assert_equal(multi[1], downscaled)

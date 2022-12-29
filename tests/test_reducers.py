@@ -1,7 +1,6 @@
 import numpy as np
 
-from xarray_multiscale.reducers import (reshape_windowed, windowed_mean,
-                                        windowed_mode)
+from xarray_multiscale.reducers import reshape_windowed, windowed_mean, windowed_mode
 
 
 def test_windowed_mean():
