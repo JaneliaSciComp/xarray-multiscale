@@ -100,7 +100,6 @@ def windowed_mean(
 
 
 def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
-
     """
     Compute the windowed mode of an array using either
     `windowed_mode_countess` or `windowed_mode_scipy`
@@ -187,7 +186,7 @@ def windowed_mode_scipy(
     )
     transposed = reshaped.transpose(transposed_shape)
     collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
-    result = mode(collapsed, axis=collapsed.ndim - 1).mode.squeeze(axis=-1)
+    result = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
     return result
 
 
