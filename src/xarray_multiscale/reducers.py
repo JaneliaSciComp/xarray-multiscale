@@ -1,7 +1,7 @@
 import math
 from functools import reduce
 from itertools import combinations
-from typing import Any, Dict, Protocol, Sequence, Tuple, cast
+from typing import Any, Protocol, Sequence, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,7 +15,8 @@ class WindowedReducer(Protocol):
         ...
 
 
-def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[Any]:
+def reshape_windowed(array: NDArray[Any],
+                     window_size: Tuple[int]) -> NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of
@@ -48,7 +49,8 @@ def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[An
     """
     if len(window_size) != array.ndim:
         raise ValueError(
-            f"Length of window_size must match array dimensionality. Got {len(window_size)}, expected {array.ndim}"
+            f"""Length of window_size must match array dimensionality.
+                 Got {len(window_size)}, expected {array.ndim}"""
         )
     new_shape: Tuple[int, ...] = ()
     for s, f in zip(array.shape, window_size):
@@ -65,8 +67,9 @@ def windowed_mean(
     Parameters
     ----------
     array: Array-like, e.g. Numpy array, Dask array
-        The array to be downscaled. The array must have ``reshape`` and
-        ``mean`` methods.
+        The array to be downscaled. The array must have
+        ``reshape`` and ``mean`` methods that obey the
+        ``np.reshape`` and ``np.mean`` APIs.
 
     window_size: Tuple of ints
         The window to use for aggregations. The array is partitioned into
@@ -89,8 +92,8 @@ def windowed_mean(
     axis per element of ``window_size``, then computing the
     mean along those extra axes.
 
-    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
-    of the array reshaping routine.
+    See ``xarray_multiscale.reductions.reshape_windowed`` for the
+    implementation of the array reshaping routine.
 
     Examples
     --------
@@ -139,8 +142,8 @@ def windowed_max(
     axis per element of ``window_size``, then computing the
     max along those extra axes.
 
-    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
-    of the array reshaping routine.
+    See ``xarray_multiscale.reductions.reshape_windowed`` for
+    the implementation of the array reshaping routine.
 
     Examples
     --------
@@ -189,8 +192,8 @@ def windowed_min(
     axis per element of ``window_size``, then computing the
     min along those extra axes.
 
-    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
-    of the array reshaping routine.
+    See ``xarray_multiscale.reductions.reshape_windowed``
+    for the implementation of the array reshaping routine.
 
     Examples
     --------
@@ -206,7 +209,8 @@ def windowed_min(
     return result
 
 
-def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode(array: NDArray[Any],
+                  window_size: Tuple[int, ...]) -> NDArray[Any]:
     """
     Compute the windowed mode of an array using either
     `windowed_mode_countess` or `windowed_mode_scipy`
@@ -292,7 +296,9 @@ def windowed_mode_scipy(
         range(1, reshaped.ndim, 2)
     )
     transposed = reshaped.transpose(transposed_shape)
-    collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
+    collapsed = transposed.reshape(
+        tuple(reshaped.shape[slice(0, None, 2)]) + (-1,)
+        )
     result = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
     return result
 
@@ -332,11 +338,16 @@ def windowed_mode_countless(
     majority = int(math.ceil(float(mode_of) / 2))
 
     for offset in np.ndindex(window_size):
-        part = array[tuple(np.s_[o::f] for o, f in zip(offset, window_size))] + 1
+        part = 1 + array[
+            tuple(np.s_[o::f] for o, f in zip(offset, window_size))
+            ]
         sections.append(part)
 
-    pick = lambda a, b: a * (a == b)
-    lor = lambda x, y: x + (x == 0) * y  # logical or
+    def pick(a, b):
+        return a * (a == b)
+
+    def lor(a, b):
+        return a + (a == 0) * b
 
     subproblems = [{}, {}]
     results2 = None

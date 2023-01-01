@@ -1,5 +1,4 @@
-from typing import (Any, Callable, Dict, Hashable, List, Literal, Sequence,
-                    Tuple, Union)
+from typing import (Any, Dict, Hashable, List, Sequence, Union)
 
 import numpy as np
 import numpy.typing as npt
@@ -137,7 +136,11 @@ def to_dataarray(array: Any) -> DataArray:
         name = None
         attrs = {}
 
-    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
+    result = DataArray(data=data,
+                       coords=coords,
+                       dims=dims,
+                       attrs=attrs,
+                       name=name)
     return result
 
 
@@ -150,7 +153,10 @@ def downscale_dask(
 
     if not np.all((np.array(array.shape) % np.array(scale_factors)) == 0):
         raise ValueError(
-            f"Coarsening factors {scale_factors} do not align with array shape {array.shape}."
+            f"""
+            Coarsening factors {scale_factors} do not align
+            with array shape {array.shape}.
+            """
         )
 
     array = align_chunks(array, scale_factors)
@@ -212,7 +218,8 @@ def downscale_coords(
     return new_coords
 
 
-def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> int:
+def downsampling_depth(shape: Sequence[int],
+                       scale_factors: Sequence[int]) -> int:
     """
     For a shape and a sequence of scale factors, calculate the
     number of downsampling operations that must be performed to produce
@@ -240,7 +247,10 @@ def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> in
     """
     if len(shape) != len(scale_factors):
         raise ValueError(
-            f"Shape (length == {len(shape)} ) and scale factors (length == {len(scale_factors)}) do not align."
+            f"""
+            Shape (length == {len(shape)} ) and
+            scale factors (length == {len(scale_factors)})
+            do not align."""
         )
 
     _scale_factors = np.array(scale_factors).astype("int")
@@ -249,6 +259,6 @@ def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> in
     if not valid.any():
         result = 0
     else:
-        depths = np.floor(logn(_shape[valid], _scale_factors[valid])).astype("int")
-        result = min(depths)
+        depths = np.floor(logn(_shape[valid], _scale_factors[valid]))
+        result = min(depths.astype('int'))
     return result
