@@ -1,4 +1,4 @@
-from typing import (Any, Dict, Hashable, List, Sequence, Union)
+from typing import Any, Dict, Hashable, List, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -136,11 +136,7 @@ def to_dataarray(array: Any) -> DataArray:
         name = None
         attrs = {}
 
-    result = DataArray(data=data,
-                       coords=coords,
-                       dims=dims,
-                       attrs=attrs,
-                       name=name)
+    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
     return result
 
 
@@ -218,8 +214,7 @@ def downscale_coords(
     return new_coords
 
 
-def downsampling_depth(shape: Sequence[int],
-                       scale_factors: Sequence[int]) -> int:
+def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> int:
     """
     For a shape and a sequence of scale factors, calculate the
     number of downsampling operations that must be performed to produce
@@ -260,5 +255,5 @@ def downsampling_depth(shape: Sequence[int],
         result = 0
     else:
         depths = np.floor(logn(_shape[valid], _scale_factors[valid]))
-        result = min(depths.astype('int'))
+        result = min(depths.astype("int"))
     return result

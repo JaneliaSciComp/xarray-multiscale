@@ -27,12 +27,8 @@ def adjust_shape(array: DataArray, scale_factors: Sequence[int]) -> DataArray:
     result = array
     misalignment = np.any(np.mod(array.shape, scale_factors))
     if misalignment:
-        new_shape = np.subtract(
-            array.shape, np.mod(array.shape, scale_factors)
-            )
-        result = array.isel(
-            {d: slice(s) for d, s in zip(array.dims, new_shape)}
-            )
+        new_shape = np.subtract(array.shape, np.mod(array.shape, scale_factors))
+        result = array.isel({d: slice(s) for d, s in zip(array.dims, new_shape)})
     return result
 
 
@@ -63,9 +59,7 @@ def broadcast_to_rank(
         result_dict = {k: value for k in range(rank)}
     elif isinstance(value, Sequence):
         if not (len(value) == rank):
-            raise ValueError(
-                f"Length of value {len(value)} must match rank: {rank}"
-                )
+            raise ValueError(f"Length of value {len(value)} must match rank: {rank}")
         else:
             result_dict = {k: v for k, v in enumerate(value)}
     elif isinstance(value, dict):
@@ -79,9 +73,7 @@ def broadcast_to_rank(
     result = tuple(result_dict.values())
     typecheck = tuple(isinstance(val, int) for val in result)
     if not all(typecheck):
-        bad_values = tuple(
-            result[idx] for idx, val in enumerate(typecheck) if not val
-            )
+        bad_values = tuple(result[idx] for idx, val in enumerate(typecheck) if not val)
         raise ValueError(
             f"""All elements of the first argument of this function
              must be ints. Found non-integer values: {bad_values}"""

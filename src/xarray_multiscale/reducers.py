@@ -15,8 +15,7 @@ class WindowedReducer(Protocol):
         ...
 
 
-def reshape_windowed(array: NDArray[Any],
-                     window_size: Tuple[int]) -> NDArray[Any]:
+def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of
@@ -209,8 +208,7 @@ def windowed_min(
     return result
 
 
-def windowed_mode(array: NDArray[Any],
-                  window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
     """
     Compute the windowed mode of an array using either
     `windowed_mode_countess` or `windowed_mode_scipy`
@@ -296,9 +294,7 @@ def windowed_mode_scipy(
         range(1, reshaped.ndim, 2)
     )
     transposed = reshaped.transpose(transposed_shape)
-    collapsed = transposed.reshape(
-        tuple(reshaped.shape[slice(0, None, 2)]) + (-1,)
-        )
+    collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
     result = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
     return result
 
@@ -338,9 +334,7 @@ def windowed_mode_countless(
     majority = int(math.ceil(float(mode_of) / 2))
 
     for offset in np.ndindex(window_size):
-        part = 1 + array[
-            tuple(np.s_[o::f] for o, f in zip(offset, window_size))
-            ]
+        part = 1 + array[tuple(np.s_[o::f] for o, f in zip(offset, window_size))]
         sections.append(part)
 
     def pick(a, b):

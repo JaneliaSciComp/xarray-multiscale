@@ -34,15 +34,11 @@ def normalize_chunks(
                 """
             )
         _chunk_size = dict(zip(range(array.ndim), map(tz.first, array.chunks)))
-        _chunk_size.update(
-            {array.get_axis_num(d): c for d, c in chunk_size.items()}
-        )
+        _chunk_size.update({array.get_axis_num(d): c for d, c in chunk_size.items()})
         chunk_size = _chunk_size
 
     new_chunks = map(
-        tz.first, da.core.normalize_chunks(
-            chunk_size, array.shape, dtype=array.dtype
-            )
+        tz.first, da.core.normalize_chunks(chunk_size, array.shape, dtype=array.dtype)
     )
 
     result = tuple(new_chunks)
@@ -50,8 +46,7 @@ def normalize_chunks(
     return {dim: result[array.get_axis_num(dim)] for dim in array.dims}
 
 
-def align_chunks(array: da.core.Array,
-                 scale_factors: Sequence[int]) -> da.core.Array:
+def align_chunks(array: da.core.Array, scale_factors: Sequence[int]) -> da.core.Array:
     """
     Ensure that all chunks are divisible by scale_factors
     """
