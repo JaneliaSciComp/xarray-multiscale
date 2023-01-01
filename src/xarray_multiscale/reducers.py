@@ -46,7 +46,10 @@ def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[An
     >>> reshaped.shape
     (3, 1, 2, 2)
     """
-
+    if len(window_size) != array.ndim:
+        raise ValueError(
+            f"Length of window_size must match array dimensionality. Got {len(window_size)}, expected {array.ndim}"
+        )
     new_shape: Tuple[int, ...] = ()
     for s, f in zip(array.shape, window_size):
         new_shape += (s // f, f)
@@ -82,8 +85,12 @@ def windowed_mean(
 
     Notes
     -----
-    This function works by first reshaping the array, then computing the
-    mean along extra axes
+    This function works by first reshaping the array to have an extra
+    axis per element of ``window_size``, then computing the
+    mean along those extra axes.
+
+    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
+    of the array reshaping routine.
 
     Examples
     --------
@@ -96,6 +103,106 @@ def windowed_mean(
     """
     reshaped = reshape_windowed(array, window_size)
     result = reshaped.mean(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    return result
+
+
+def windowed_max(
+    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
+) -> NDArray[Any]:
+    """
+    Compute the windowed maximum of an array.
+
+    Parameters
+    ----------
+    array: Array-like, e.g. Numpy array, Dask array
+        The array to be downscaled. The array must have ``reshape`` and
+        ``max`` methods.
+
+    window_size: Tuple of ints
+        The window to use for aggregations. The array is partitioned into
+        non-overlapping regions with size equal to ``window_size``, and the
+        values in each window are aggregated to generate the result.
+
+    **kwargs: dict, optional
+        Extra keyword arguments passed to ``array.mean``
+
+    Returns
+    -------
+    Array-like
+        The result of the windowed max. The length of each axis of this array
+        will be a fraction of the input. The datatype of the return value will
+        will be the same as the input.
+
+    Notes
+    -----
+    This function works by first reshaping the array to have an extra
+    axis per element of ``window_size``, then computing the
+    max along those extra axes.
+
+    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
+    of the array reshaping routine.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from xarray_multiscale.reducers import windowed_mean
+    >>> data = np.arange(16).reshape(4, 4)
+    >>> windowed_max(data, (2, 2))
+    array([[ 5,  7],
+           [13, 15]])
+    """
+    reshaped = reshape_windowed(array, window_size)
+    result = reshaped.max(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    return result
+
+
+def windowed_min(
+    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
+) -> NDArray[Any]:
+    """
+    Compute the windowed minimum of an array.
+
+    Parameters
+    ----------
+    array: Array-like, e.g. Numpy array, Dask array
+        The array to be downscaled. The array must have ``reshape`` and
+        ``min`` methods.
+
+    window_size: Tuple of ints
+        The window to use for aggregations. The array is partitioned into
+        non-overlapping regions with size equal to ``window_size``, and the
+        values in each window are aggregated to generate the result.
+
+    **kwargs: dict, optional
+        Extra keyword arguments passed to ``array.mean``
+
+    Returns
+    -------
+    Array-like
+        The result of the windowed min. The length of each axis of this array
+        will be a fraction of the input. The datatype of the return value will
+        will be the same as the input.
+
+    Notes
+    -----
+    This function works by first reshaping the array to have an extra
+    axis per element of ``window_size``, then computing the
+    min along those extra axes.
+
+    See ``xarray_multiscale.reductions.reshape_windowed`` for the implementation
+    of the array reshaping routine.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from xarray_multiscale.reducers import windowed_mean
+    >>> data = np.arange(16).reshape(4, 4)
+    >>> windowed_min(data, (2, 2))
+    array([[0,  2],
+           [8, 10]])
+    """
+    reshaped = reshape_windowed(array, window_size)
+    result = reshaped.min(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
     return result
 
 

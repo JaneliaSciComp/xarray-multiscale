@@ -73,6 +73,10 @@ def multiscale(
     Returns
     -------
     result : list of DataArrays
+        The first element of this list is the input array, converted to an
+        `xarray.DataArray`. Each subsquent element of the list is
+        the result of downsampling the previous element of the list.
+
         The `coords` attributes of these DataArrays track the changing
         offset and scale induced by the downsampling operation.
 
@@ -91,35 +95,30 @@ def multiscale(
       * dim_0    (dim_0) float64 0.5 2.5]
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
-    normalized_array = normalize_array(array, scale_factors)
-    # the depth - 1 here prevents getting arrays with a singleton dimension size
-    levels = range(
-        downsampling_depth(normalized_array.shape, scale_factors) - 1
-        )
-    scales = tuple(tuple(s**level for s in scale_factors) for level in levels)
-    result: List[DataArray] = []
+    darray = to_dataarray(array)
+
+    levels = range(1, downsampling_depth(darray.shape, scale_factors))
+
+    result: List[DataArray] = [darray]
     for level in levels:
-        if level == 0:
-            result.append(normalized_array)
         if chained:
             scale = scale_factors
             source = result[-1]
         else:
-            scale = scales[level]
+            scale = tuple(s**level for s in scale_factors)
             source = result[0]
         result.append(downscale(source, reduction, scale, preserve_dtype))
 
-    if normalized_array.chunks is not None:
+    if darray.chunks is not None:
         new_chunks = [normalize_chunks(r, chunks) for r in result]
         result = [r.chunk(ch) for r, ch in zip(result, new_chunks)]
 
     return result
 
 
-def normalize_array(array: Any, scale_factors: Sequence[int]) -> DataArray:
+def to_dataarray(array: Any) -> DataArray:
     """
-    Ingest an array in preparation for downscaling by converting to DataArray
-    and trimming as needed.
+    Convert the input to DataArray if it is not already one.
     """
     if isinstance(array, DataArray):
         data = array.data
@@ -131,17 +130,15 @@ def normalize_array(array: Any, scale_factors: Sequence[int]) -> DataArray:
     else:
         data = array
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
-        offset = 0.0
         coords = {
-            dim: DataArray(offset + np.arange(shp, dtype="float"), dims=dim)
-            for dim, shp in zip(dims, array.shape)
+            dim: DataArray(np.arange(shape, dtype="float"), dims=dim)
+            for dim, shape in zip(dims, array.shape)
         }
         name = None
         attrs = {}
 
-    to_reshape = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
-    reshaped = adjust_shape(to_reshape, scale_factors=scale_factors)
-    return reshaped
+    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
+    return result
 
 
 def downscale_dask(
@@ -182,7 +179,7 @@ def downscale(
     **kwargs: Any,
 ) -> Any:
 
-    to_downscale = normalize_array(array, scale_factors)
+    to_downscale = adjust_shape(array, scale_factors)
     if to_downscale.chunks is not None:
         downscaled_data = downscale_dask(
             to_downscale.data, reduction, scale_factors, **kwargs
