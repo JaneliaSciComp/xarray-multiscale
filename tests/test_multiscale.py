@@ -4,14 +4,9 @@ import pytest
 from xarray import DataArray
 from xarray.testing import assert_equal
 
-from xarray_multiscale.multiscale import (
-    adjust_shape,
-    downscale,
-    downscale_coords,
-    downscale_dask,
-    downsampling_depth,
-    multiscale,
-)
+from xarray_multiscale.multiscale import (adjust_shape, downsampling_depth,
+                                          downscale, downscale_coords,
+                                          downscale_dask, multiscale)
 from xarray_multiscale.reducers import windowed_mean
 
 
@@ -113,8 +108,9 @@ def test_invalid_multiscale():
         downscale_dask(np.arange(16).reshape(4, 4), windowed_mean, (3, 3))
 
 
-def test_multiscale():
-    ndim = 3
+@pytest.mark.parametrize("chained", (True, False))
+@pytest.mark.parametrize("ndim", (1, 2, 3, 4))
+def test_multiscale(ndim: int, chained: bool):
     chunks = (2,) * ndim
     shape = (9,) * ndim
     cropslice = tuple(slice(s) for s in shape)
@@ -125,21 +121,11 @@ def test_multiscale():
         cropslice
     ]
 
-    pyr = multiscale(base_array, windowed_mean, 2)
-    pyr_unchained = multiscale(base_array, windowed_mean, 2, chained=False)
-    assert [p.shape for p in pyr] == [(8, 8, 8), (4, 4, 4), (2, 2, 2)]
+    pyr = multiscale(base_array, windowed_mean, 2, chained=chained)
+    assert [p.shape for p in pyr] == [shape, (4,) * ndim, (2,) * ndim]
 
     # check that the first multiscale array is identical to the input data
-    # up to the trimmed edges
-    assert np.array_equal(
-        pyr[0].data, base_array[tuple(slice(s) for s in pyr[0].data.shape)]
-    )
-
-    assert np.array_equal(pyr[-2].data.mean(), pyr[-1].data.mean())
-    assert np.array_equal(
-        pyr_unchained[-2].data.mean(),
-        pyr_unchained[-1].data.mean(),
-    )
+    assert np.array_equal(pyr[0].data, base_array)
 
 
 def test_chunking():

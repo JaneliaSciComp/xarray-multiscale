@@ -67,13 +67,15 @@ def broadcast_to_rank(
             result_dict[dim] = value.get(dim, 1)
     else:
         raise ValueError(
-            f"The first argument must be an int, a sequence of ints, or a dict of ints. Got {type(value)}"
+            f"""The first argument must be an int, a sequence of ints,
+             or a dict of ints. Got {type(value)}"""
         )
     result = tuple(result_dict.values())
     typecheck = tuple(isinstance(val, int) for val in result)
     if not all(typecheck):
         bad_values = tuple(result[idx] for idx, val in enumerate(typecheck) if not val)
         raise ValueError(
-            f"All elements of the first argument of this function must be ints. Non-integer values: {bad_values}"
+            f"""All elements of the first argument of this function
+             must be ints. Found non-integer values: {bad_values}"""
         )
     return result
