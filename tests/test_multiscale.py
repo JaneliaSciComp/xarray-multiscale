@@ -4,9 +4,14 @@ import pytest
 from xarray import DataArray
 from xarray.testing import assert_equal
 
-from xarray_multiscale.multiscale import (adjust_shape, downsampling_depth,
-                                          downscale, downscale_coords,
-                                          downscale_dask, multiscale)
+from xarray_multiscale.multiscale import (
+    adjust_shape,
+    downsampling_depth,
+    downscale,
+    downscale_coords,
+    downscale_dask,
+    multiscale,
+)
 from xarray_multiscale.reducers import windowed_mean
 
 
@@ -130,33 +135,54 @@ def test_multiscale(ndim: int, chained: bool):
 
 def test_chunking():
     ndim = 3
-    shape = (9,) * ndim
-    base_array = da.zeros(shape, chunks=(1,) * ndim)
-    chunks = (1,) * ndim
+    shape = (16,) * ndim
+    chunks = (4,) * ndim
+    base_array = da.zeros(shape, chunks=chunks)
     reducer = windowed_mean
-    multi = multiscale(base_array, reducer, 2, chunks=chunks)
-    assert all([m.data.chunksize == chunks for m in multi])
+    scale_factors = (2,) * ndim
 
-    chunks = (3,) * ndim
-    multi = multiscale(base_array, reducer, 2, chunks=chunks)
-    for m in multi:
-        assert m.data.chunksize == chunks or m.data.chunksize == m.data.shape
+    multi = multiscale(base_array, reducer, scale_factors)
+    expected_chunks = [
+        np.floor_divide(chunks, [s**idx for s in scale_factors])
+        for idx, m in enumerate(multi)
+    ]
+    expected_chunks = [
+        x
+        if np.all(x)
+        else [
+            1,
+        ]
+        * ndim
+        for x in expected_chunks
+    ]
+    assert all(
+        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
+    )
 
-    chunks = (3,) * ndim
-    multi = multiscale(base_array, reducer, 2, chunks=chunks)
-    for m in multi:
-        assert (
-            np.greater_equal(m.data.chunksize, chunks).all()
-            or m.data.chunksize == m.data.shape
-        )
+    multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
+    expected_chunks = [
+        chunks if np.greater(m.shape, chunks).all() else m.shape
+        for idx, m in enumerate(multi)
+    ]
+    assert all(
+        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
+    )
+
+    chunks = (3, -1, -1)
+    multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
+    expected_chunks = [
+        (min(chunks[0], m.shape[0]), m.shape[1], m.shape[2]) for m in multi
+    ]
+    assert all(
+        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
+    )
 
     chunks = 3
-    multi = multiscale(base_array, reducer, 2, chunks=chunks)
-    for m in multi:
-        assert (
-            np.greater_equal(m.data.chunksize, (chunks,) * ndim).all()
-            or m.data.chunksize == m.data.shape
-        )
+    multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
+    expected_chunks = [tuple(min(chunks, s) for s in m.shape) for m in multi]
+    assert all(
+        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
+    )
 
 
 def test_coords():

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Hashable, List, Sequence, Union
+from typing import Any, Dict, Hashable, List, Literal, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -13,13 +13,15 @@ from xarray_multiscale.chunks import align_chunks, normalize_chunks
 from xarray_multiscale.reducers import WindowedReducer
 from xarray_multiscale.util import adjust_shape, broadcast_to_rank, logn
 
+ChunkOption = Literal["preserve", "auto"]
+
 
 def multiscale(
     array: npt.NDArray[Any],
     reduction: WindowedReducer,
     scale_factors: Union[Sequence[int], int],
     preserve_dtype: bool = True,
-    chunks: Union[str, Sequence[int], Dict[Hashable, int]] = "auto",
+    chunks: Union[str, Sequence[int], Dict[Hashable, int]] = "preserve",
     chained: bool = True,
 ) -> List[DataArray]:
     """
@@ -44,10 +46,11 @@ def multiscale(
         input array. If False, output arrays will have data type determined
         by the output of the reduction function.
 
-    chunks : sequence or dict of ints, or the string "auto" (default)
+    chunks : sequence or dict of ints, or the string "preserve" (default)
         Set the chunking of the output arrays. Applies only to dask arrays.
-        If `chunks` is set to "auto" (the default), then chunk sizes will
-        decrease with each level of downsampling.
+        If `chunks` is set to "preserve" (the default), then chunk sizes will
+        decrease with each level of downsampling. Otherwise, this argument is
+        passed to `xarray_multiscale.chunks.normalize_chunks`.
 
         Otherwise, this keyword argument will be passed to the
         `xarray.DataArray.chunk` method for each output array,
@@ -108,7 +111,7 @@ def multiscale(
             source = result[0]
         result.append(downscale(source, reduction, scale, preserve_dtype))
 
-    if darray.chunks is not None:
+    if darray.chunks is not None and chunks != "preserve":
         new_chunks = [normalize_chunks(r, chunks) for r in result]
         result = [r.chunk(ch) for r, ch in zip(result, new_chunks)]
 
