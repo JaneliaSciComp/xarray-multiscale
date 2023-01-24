@@ -38,7 +38,13 @@ def normalize_chunks(
         chunk_size = _chunk_size
 
     new_chunks = map(
-        tz.first, da.core.normalize_chunks(chunk_size, array.shape, dtype=array.dtype)
+        tz.first,
+        da.core.normalize_chunks(
+            chunk_size,
+            array.shape,
+            dtype=array.dtype,
+            previous_chunks=array.data.chunksize,
+        ),
     )
 
     result = tuple(new_chunks)

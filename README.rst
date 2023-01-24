@@ -47,6 +47,7 @@ which returns this (a collection of DataArrays, each with decreasing size):
     Coordinates:
     * dim_0    (dim_0) float64 0.5 2.5]
 
+By default, the values of the downsampled arrays are cast to the same data type as the input. This behavior can be changed with the ``preserve_dtype`` keyword argument to ``multiscale``.
 
 Generate a multiscale representation of an ``xarray.DataArray``:
 
