@@ -4,9 +4,13 @@ import dask.array as da
 import numpy as np
 import pytest
 
-from xarray_multiscale.reducers import (reshape_windowed, windowed_max,
-                                        windowed_mean, windowed_min,
-                                        windowed_mode)
+from xarray_multiscale.reducers import (
+    reshape_windowed,
+    windowed_max,
+    windowed_mean,
+    windowed_min,
+    windowed_mode,
+)
 
 
 @pytest.mark.parametrize("ndim", (1, 2, 3))

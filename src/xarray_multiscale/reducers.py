@@ -327,7 +327,7 @@ def windowed_mode_countless(
         The window size. The length of ``window_size`` must match the
         dimensionality of ``array``.
 
-    """
+    """  # noqa
     sections = []
 
     mode_of = reduce(lambda x, y: x * y, window_size)
