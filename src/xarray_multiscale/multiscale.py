@@ -1,4 +1,14 @@
-from typing import Any, Dict, Hashable, List, Literal, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Hashable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Union,
+)
 
 import numpy as np
 import numpy.typing as npt
@@ -16,6 +26,13 @@ from xarray_multiscale.util import adjust_shape, broadcast_to_rank, logn
 ChunkOption = Literal["preserve", "auto"]
 
 
+def _default_namer(idx: int) -> str:
+    """
+    The default naming function. Takes an integer index and prepends "s" in front of it.
+    """
+    return f"s{idx}"
+
+
 def multiscale(
     array: npt.NDArray[Any],
     reduction: WindowedReducer,
@@ -23,6 +40,7 @@ def multiscale(
     preserve_dtype: bool = True,
     chunks: Union[str, Sequence[int], Dict[Hashable, int]] = "preserve",
     chained: bool = True,
+    namer: Callable[[int], str] = _default_namer,
 ) -> List[DataArray]:
     """
     Generate a coordinate-aware multiscale representation of an array.
@@ -72,6 +90,11 @@ def multiscale(
         power. This means that the nth downscaled array directly depends
         on the input array.
 
+    namer : callable, defaults to ```_default_namer```
+        A function for naming the output arrays. This function should take an integer
+        index and return a string. The default function simply prepends the string
+        representation of the integer with the character "s".
+
     Returns
     -------
     result : list of DataArrays
@@ -97,7 +120,7 @@ def multiscale(
       * dim_0    (dim_0) float64 0.5 2.5]
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
-    darray = to_dataarray(array)
+    darray = to_dataarray(array, name=namer(0))
 
     levels = range(1, downsampling_depth(darray.shape, scale_factors))
 
@@ -109,7 +132,9 @@ def multiscale(
         else:
             scale = tuple(s**level for s in scale_factors)
             source = result[0]
-        result.append(downscale(source, reduction, scale, preserve_dtype))
+        downscaled = downscale(source, reduction, scale, preserve_dtype)
+        downscaled.name = namer(level)
+        result.append(downscaled)
 
     if darray.chunks is not None and chunks != "preserve":
         new_chunks = [normalize_chunks(r, chunks) for r in result]
@@ -118,7 +143,7 @@ def multiscale(
     return result
 
 
-def to_dataarray(array: Any) -> DataArray:
+def to_dataarray(array: Any, name: Optional[str] = None) -> DataArray:
     """
     Convert the input to DataArray if it is not already one.
     """
@@ -128,7 +153,6 @@ def to_dataarray(array: Any) -> DataArray:
         # ensure that key order matches dimension order
         coords = {d: array.coords[d] for d in dims}
         attrs = array.attrs
-        name = array.name
     else:
         data = array
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
@@ -136,7 +160,6 @@ def to_dataarray(array: Any) -> DataArray:
             dim: DataArray(np.arange(shape, dtype="float"), dims=dim)
             for dim, shape in zip(dims, array.shape)
         }
-        name = None
         attrs = {}
 
     result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
@@ -182,7 +205,7 @@ def downscale(
     scale_factors: Sequence[int],
     preserve_dtype: bool = True,
     **kwargs: Any,
-) -> Any:
+) -> DataArray:
 
     to_downscale = adjust_shape(array, scale_factors)
     if to_downscale.chunks is not None:

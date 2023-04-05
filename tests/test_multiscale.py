@@ -203,3 +203,19 @@ def test_coords():
 
     assert_equal(multi[0], array)
     assert_equal(multi[1], downscaled)
+
+
+@pytest.mark.parametrize("template", ("default", "{}"))
+def test_namer(template):
+    from xarray_multiscale.multiscale import _default_namer
+
+    if template == "default":
+        namer = _default_namer
+    else:
+
+        def namer(v):
+            return template.format(v)
+
+    data = np.arange(16)
+    m = multiscale(data, windowed_mean, 2, namer=namer)
+    assert all(element.name == namer(idx) for idx, element in enumerate(m))
