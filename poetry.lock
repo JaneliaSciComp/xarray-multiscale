@@ -1335,6 +1335,21 @@ parallel = ["dask[complete]"]
 viz = ["matplotlib", "nc-time-axis", "seaborn"]
 
 [[package]]
+name = "xarray-datatree"
+version = "0.0.12"
+description = "Hierarchical tree-like data structures for xarray"
+category = "main"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "xarray-datatree-0.0.12.tar.gz", hash = "sha256:6fc2d80fbdf691f449236578a3844d6b7253fdb62d507ba3a813b8144eba5f9c"},
+    {file = "xarray_datatree-0.0.12-py3-none-any.whl", hash = "sha256:6fef5356c7cca453308484e3a3fd9fab597542289dfcbf8b6b7e0262dfc4240d"},
+]
+
+[package.dependencies]
+xarray = ">=2022.6.0"
+
+[[package]]
 name = "zipp"
 version = "3.13.0"
 description = "Backport of pathlib-compatible object wrapper for zip files"
@@ -1353,4 +1368,4 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "49b76840e480d4e86a328c8925269b8fa2dad9f0da8d3c9f44859924f9a6c38f"
+content-hash = "fe8ece59ede2eea1cca279d90cc06dec70404fd06f53e710ee1dae921717211f"

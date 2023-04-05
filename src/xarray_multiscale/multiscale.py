@@ -7,11 +7,12 @@ from dask.base import tokenize
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import apply
-from xarray import DataArray
+from xarray import DataArray, Dataset
 
 from xarray_multiscale.chunks import align_chunks, normalize_chunks
 from xarray_multiscale.reducers import WindowedReducer
 from xarray_multiscale.util import adjust_shape, broadcast_to_rank, logn
+from datatree import DataTree
 
 ChunkOption = Literal["preserve", "auto"]
 
@@ -23,6 +24,7 @@ def multiscale(
     preserve_dtype: bool = True,
     chunks: Union[str, Sequence[int], Dict[Hashable, int]] = "preserve",
     chained: bool = True,
+    keep_attrs: bool = False,
 ) -> List[DataArray]:
     """
     Generate a coordinate-aware multiscale representation of an array.
@@ -115,10 +117,14 @@ def multiscale(
         new_chunks = [normalize_chunks(r, chunks) for r in result]
         result = [r.chunk(ch) for r, ch in zip(result, new_chunks)]
 
-    return result
+    tree = DataTree.from_dict(
+        {f"s{idx}": Dataset({str(m.name): m}) for idx, m in enumerate(result)}
+    )
+
+    return tree
 
 
-def to_dataarray(array: Any) -> DataArray:
+def to_dataarray(array: Any, keep_attrs: bool = False) -> DataArray:
     """
     Convert the input to DataArray if it is not already one.
     """
@@ -127,7 +133,8 @@ def to_dataarray(array: Any) -> DataArray:
         dims = array.dims
         # ensure that key order matches dimension order
         coords = {d: array.coords[d] for d in dims}
-        attrs = array.attrs
+        if keep_attrs:
+            attrs = array.attrs
         name = array.name
     else:
         data = array
