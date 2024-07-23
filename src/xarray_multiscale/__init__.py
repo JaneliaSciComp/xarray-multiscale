@@ -5,4 +5,5 @@ from .reducers import (  # noqa: F401
     windowed_mode,
     windowed_max,
     windowed_min,
+    windowed_rank,
 )

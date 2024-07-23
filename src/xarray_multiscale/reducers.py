@@ -374,3 +374,56 @@ def windowed_mode_countless(
     final_result = lor(reduce(lor, results), sections[-1]) - 1
 
     return final_result
+
+
+def windowed_rank(
+    array: NDArray[Any], window_size: Tuple[int, ...], rank: int
+) -> NDArray[Any]:
+    """
+    Compute the windowed rank order filter of an array.
+    Input will be coerced to a numpy array.
+
+    Parameters
+    ----------
+    array: Array-like, e.g. Numpy array, Dask array
+        The array to be downscaled. The array must have a ``reshape``
+        method.
+
+    window_size: Tuple of ints
+        The window to use for aggregation. The array is partitioned into
+        non-overlapping regions with size equal to ``window_size``, and the
+        values in each window are sorted to generate the result.
+
+    rank: int
+        The index to take from the sorted values in each window. Must be
+        between 0 and the product of the elements of ``window_size``, minus one.
+        Use negative indices to count from the end of the sorted window.
+
+    Returns
+    -------
+    Numpy array
+        The result of the windowed rank filter. The length of each axis of this array
+        will be a fraction of the input.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from xarray_multiscale.reducers import windowed_rank
+    >>> data = np.arange(16).reshape(4, 4)
+    >>> windowed_rank(data, (2, 2), -2)
+    array([[ 4  6]
+           [12 14]])
+    """
+    max_rank = np.prod(window_size) - 1
+    if rank > max_rank or rank < -max_rank - 1:
+        raise ValueError(
+            f"Rank must be between either -1 and {-max_rank-1} or 0 and {max_rank} for window_size {window_size}."
+        )
+    reshaped = reshape_windowed(array, window_size)
+    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(
+        range(1, reshaped.ndim, 2)
+    )
+    transposed = reshaped.transpose(transposed_shape)
+    collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
+    result = np.take(np.sort(collapsed, axis=-1), rank, axis=-1)
+    return result
