@@ -1,29 +1,128 @@
-[tool.poetry]
-name = "xarray-multiscale"
-version = "2.0.0"
-description = ""
-authors = ["Davis Vann Bennett <davis.v.bennett@gmail.com>"]
-
-[tool.poetry.dependencies]
-python = "^3.9"
-xarray = ">=2022.03.0"
-scipy = ">=1.5.4"
-numpy = ">=1.19.4"
-dask = ">=2020.12.0"
-
-[tool.poetry.group.dev.dependencies]
-Sphinx = "^4.4.0"
-sphinx-rtd-theme = "^1.0.0"
-numpydoc = "^1.2"
-sphinx-issues = "^3.0.1"
-pytest-cov = "^3.0.0"
-pytest = "^7.1.2"
-mypy = "^0.971"
-pre-commit = "^3.0.0"
-
 [build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[mypy]
-plugins = "numpy.typing.mypy_plugin"
+[project]
+name = "xarray-multiscale"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Davis Vann Bennett", email = "davis.v.bennett@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "xarray >=2022.03.0",
+    "scipy >=1.5.4",
+    "numpy >=1.19.4",
+    "dask >=2020.12.0"
+]
+
+[project.urls]
+Documentation = "https://github.com/janelia-scicomp/xarray-multiscale#readme"
+Issues = "https://github.com/janelia-scicomp/xarray-multiscale/issues"
+Source = "https://github.com/janelia-scicomp/xarray-multiscale"
+
+[tool.hatch.version]
+path = "src/xarray_multiscale/__about__.py"
+
+[tool.hatch.envs.test]
+dependencies = [
+    "coverage",
+    "pytest",
+    "pytest-cov",
+    "pytest-examples == 0.0.12"
+    ]
+
+[[tool.hatch.envs.test.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12"]
+
+[tool.hatch.envs.docs]
+dependencies = [
+    "mkdocs-material == 9.5.30",
+    "mkdocstrings[python] == 0.25.1",
+    ]
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/xarray_multiscale tests}"
+
+[tool.coverage.run]
+source_pkgs = ["xarray_multiscale", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/xarray_multiscale/__about__.py",
+]
+
+[tool.coverage.paths]
+xarray_multiscale = ["src/xarray_multiscale", "*/xarray-multiscale/src/xarray_multiscale"]
+tests = ["tests", "*/xarray-multiscale/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+force-exclude = true
+extend-exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "venv",
+    "docs",
+]
+
+[tool.ruff.lint]
+extend-select = [
+    "B",  # flake8-bugbear
+    "I",  # isort
+    "ISC",
+    "UP",  # pyupgrade
+    "RSE",
+    "RUF",
+]
+ignore = [
+    "RUF005",
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+namespace_packages = false
+
+strict = true
+warn_unreachable = true
+
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]

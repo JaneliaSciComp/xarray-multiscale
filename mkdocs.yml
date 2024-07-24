@@ -1,0 +1,64 @@
+site_name: xarray-ome-ngff
+site_url: https://janeliascicomp.github.io/xarray-multiscale/
+site_author: Davis Bennett
+site_description: >-
+  Multiscale images via Xarray.
+
+# Repository
+repo_name: janeliascicomp/xarray-multiscale
+repo_url: https://github.com/janeliascicomp/xarray-multiscale
+
+# Copyright
+copyright: Copyright &copy; 2016 - 2024 HHMI / Janelia
+watch: [src]
+theme:
+  features:
+    - navigation.expand
+    - content.code.annotate
+  name: material
+  palette: 
+  # Palette toggle for light mode
+  - scheme: default
+    toggle:
+      icon: material/brightness-7 
+      name: Switch to dark mode
+
+  # Palette toggle for dark mode
+  - scheme: slate
+    toggle:
+      icon: material/brightness-4
+      name: Switch to light mode
+
+nav:
+    - About: index.md
+    - API:
+      - multiscale: api/multiscale.md
+      - reducers: api/reducers.md
+      - chunks: api/chunks.md
+      - util: api/util.md
+
+plugins:
+- mkdocstrings:
+    handlers:
+        python:
+          options:
+            docstring_style: numpy
+            members_order: source
+            separate_signature: true
+            filters: ["!^_"]
+            docstring_options:
+              ignore_init_summary: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - toc:
+      baselevel: 2
+      toc_depth: 4
+      permalink: "#"

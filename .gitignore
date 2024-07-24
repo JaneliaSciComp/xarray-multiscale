@@ -42,3 +42,6 @@ pip-wheel-metadata
 
 # numba
 */__pycache__/*
+
+# docs
+site

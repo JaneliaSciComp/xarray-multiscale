@@ -1,21 +1,27 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from typing import Any, Sequence
+
+    import numpy.typing as npt
+
 import math
 from functools import reduce
 from itertools import combinations
-from typing import Any, Protocol, Sequence, Tuple
 
 import numpy as np
-from numpy.typing import NDArray
 from scipy.stats import mode
 
 
 class WindowedReducer(Protocol):
     def __call__(
-        self, array: NDArray[Any], window_size: Sequence[int], **kwargs: Any
-    ) -> NDArray[Any]:
-        ...
+        self, array: npt.NDArray[Any], window_size: Sequence[int], **kwargs: Any
+    ) -> npt.NDArray[Any]: ...
 
 
-def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[Any]:
+def reshape_windowed(array: npt.NDArray[Any], window_size: tuple[int, ...]) -> npt.NDArray[Any]:
     """
     Reshape an array to support windowed operations. New
     dimensions will be added to the array, one for each element of
@@ -51,15 +57,15 @@ def reshape_windowed(array: NDArray[Any], window_size: Tuple[int]) -> NDArray[An
             f"""Length of window_size must match array dimensionality.
                  Got {len(window_size)}, expected {array.ndim}"""
         )
-    new_shape: Tuple[int, ...] = ()
+    new_shape: tuple[int, ...] = ()
     for s, f in zip(array.shape, window_size):
         new_shape += (s // f, f)
     return array.reshape(new_shape)
 
 
 def windowed_mean(
-    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: tuple[int, ...], **kwargs: Any
+) -> npt.NDArray[Any]:
     """
     Compute the windowed mean of an array.
 
@@ -104,13 +110,13 @@ def windowed_mean(
            [10.5, 12.5]])
     """
     reshaped = reshape_windowed(array, window_size)
-    result = reshaped.mean(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    result: npt.NDArray[Any] = reshaped.mean(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
     return result
 
 
 def windowed_max(
-    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: tuple[int, ...], **kwargs: Any
+) -> npt.NDArray[Any]:
     """
     Compute the windowed maximum of an array.
 
@@ -154,13 +160,13 @@ def windowed_max(
            [13, 15]])
     """
     reshaped = reshape_windowed(array, window_size)
-    result = reshaped.max(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    result: npt.NDArray[Any] = reshaped.max(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
     return result
 
 
 def windowed_min(
-    array: NDArray[Any], window_size: Tuple[int, ...], **kwargs: Any
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: tuple[int, ...], **kwargs: Any
+) -> npt.NDArray[Any]:
     """
     Compute the windowed minimum of an array.
 
@@ -204,11 +210,11 @@ def windowed_min(
            [8, 10]])
     """
     reshaped = reshape_windowed(array, window_size)
-    result = reshaped.min(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
+    result: npt.NDArray[Any] = reshaped.min(axis=tuple(range(1, reshaped.ndim, 2)), **kwargs)
     return result
 
 
-def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[Any]:
+def windowed_mode(array: npt.NDArray[Any], window_size: tuple[int, ...]) -> npt.NDArray[Any]:
     """
     Compute the windowed mode of an array using either
     `windowed_mode_countess` or `windowed_mode_scipy`
@@ -252,9 +258,7 @@ def windowed_mode(array: NDArray[Any], window_size: Tuple[int, ...]) -> NDArray[
         return windowed_mode_scipy(array, window_size)
 
 
-def windowed_mode_scipy(
-    array: NDArray[Any], window_size: Tuple[int, ...]
-) -> NDArray[Any]:
+def windowed_mode_scipy(array: npt.NDArray[Any], window_size: tuple[int, ...]) -> npt.NDArray[Any]:
     """
     Compute the windowed mode of an array using scipy.stats.mode.
     Input will be coerced to a numpy array.
@@ -290,18 +294,24 @@ def windowed_mode_scipy(
            [ 8, 10]])
     """
     reshaped = reshape_windowed(array, window_size)
-    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(
-        range(1, reshaped.ndim, 2)
-    )
+    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(range(1, reshaped.ndim, 2))
     transposed = reshaped.transpose(transposed_shape)
     collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
-    result = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
+    result: npt.NDArray[Any] = mode(collapsed, axis=collapsed.ndim - 1, keepdims=False).mode
     return result
 
 
+def _pick(a: npt.NDArray[Any], b: npt.NDArray[Any]) -> Any:
+    return a * (a == b)
+
+
+def _lor(a: npt.NDArray[Any], b: npt.NDArray[Any]) -> Any:
+    return a + (a == 0) * b
+
+
 def windowed_mode_countless(
-    array: NDArray[Any], window_size: Tuple[int, ...]
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: tuple[int, ...]
+) -> npt.NDArray[Any]:
     """
     countless downsamples labeled images (segmentations)
     by finding the mode using vectorized instructions.
@@ -327,7 +337,7 @@ def windowed_mode_countless(
         The window size. The length of ``window_size`` must match the
         dimensionality of ``array``.
 
-    """  # noqa
+    """
     sections = []
 
     mode_of = reduce(lambda x, y: x * y, window_size)
@@ -337,19 +347,13 @@ def windowed_mode_countless(
         part = 1 + array[tuple(np.s_[o::f] for o, f in zip(offset, window_size))]
         sections.append(part)
 
-    def pick(a, b):
-        return a * (a == b)
-
-    def lor(a, b):
-        return a + (a == 0) * b
-
-    subproblems = [{}, {}]
+    subproblems: list[dict[tuple[int, int], npt.ArrayLike]] = [{}, {}]
     results2 = None
     for x, y in combinations(range(len(sections) - 1), 2):
-        res = pick(sections[x], sections[y])
+        res = _pick(sections[x], sections[y])
         subproblems[0][(x, y)] = res
         if results2 is not None:
-            results2 = lor(results2, res)
+            results2 = _lor(results2, res)  # type: ignore[unreachable]
         else:
             results2 = res
 
@@ -357,13 +361,13 @@ def windowed_mode_countless(
     for r in range(3, majority + 1):
         r_results = None
         for combo in combinations(range(len(sections)), r):
-            res = pick(subproblems[0][combo[:-1]], sections[combo[-1]])
+            res = _pick(subproblems[0][combo[:-1]], sections[combo[-1]])  # type: ignore[index, arg-type]
 
             if combo[-1] != len(sections) - 1:
-                subproblems[1][combo] = res
+                subproblems[1][combo] = res  # type: ignore[index]
 
             if r_results is not None:
-                r_results = lor(r_results, res)
+                r_results = _lor(r_results, res)  # type: ignore[unreachable]
             else:
                 r_results = res
         results.append(r_results)
@@ -371,14 +375,14 @@ def windowed_mode_countless(
         subproblems[1] = {}
 
     results.reverse()
-    final_result = lor(reduce(lor, results), sections[-1]) - 1
+    final_result: npt.NDArray[Any] = _lor(reduce(_lor, results), sections[-1]) - 1  # type: ignore[arg-type]
 
     return final_result
 
 
 def windowed_rank(
-    array: NDArray[Any], window_size: Tuple[int, ...], rank: int
-) -> NDArray[Any]:
+    array: npt.NDArray[Any], window_size: tuple[int, ...], rank: int = -1
+) -> npt.NDArray[Any]:
     """
     Compute the windowed rank order filter of an array.
     Input will be coerced to a numpy array.
@@ -389,15 +393,18 @@ def windowed_rank(
         The array to be downscaled. The array must have a ``reshape``
         method.
 
-    window_size: Tuple of ints
+    window_size: tuple[int, ...]
         The window to use for aggregation. The array is partitioned into
         non-overlapping regions with size equal to ``window_size``, and the
         values in each window are sorted to generate the result.
 
-    rank: int
-        The index to take from the sorted values in each window. Must be
-        between 0 and the product of the elements of ``window_size``, minus one.
-        Use negative indices to count from the end of the sorted window.
+    rank: int, default=-1
+        The index to take from the sorted values in each window. If non-negative, then
+        rank must be between 0 and the product of the elements of ``window_size`` minus one,
+        (inclusive).
+        Rank may be negative, in which case it denotes an index relative to the end of the sorted
+        values following normal python indexing rules.
+        E.g., when rank is -1 (the default), this takes the maxmum value of each window.
 
     Returns
     -------
@@ -416,14 +423,15 @@ def windowed_rank(
     """
     max_rank = np.prod(window_size) - 1
     if rank > max_rank or rank < -max_rank - 1:
-        raise ValueError(
-            f"Rank must be between either -1 and {-max_rank-1} or 0 and {max_rank} for window_size {window_size}."
+        msg = (
+            f"Invalid rank: {rank} for window_size: {window_size} ",
+            f"If rank is negative then between either -1 and {-max_rank-1}, inclusive",
+            f"If rank is non-negtaive, then it must be between 0 and {max_rank}, inclusive.",
         )
+        raise ValueError(msg)
     reshaped = reshape_windowed(array, window_size)
-    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(
-        range(1, reshaped.ndim, 2)
-    )
+    transposed_shape = tuple(range(0, reshaped.ndim, 2)) + tuple(range(1, reshaped.ndim, 2))
     transposed = reshaped.transpose(transposed_shape)
     collapsed = transposed.reshape(tuple(reshaped.shape[slice(0, None, 2)]) + (-1,))
-    result = np.take(np.sort(collapsed, axis=-1), rank, axis=-1)
+    result: npt.NDArray[Any] = np.take(np.sort(collapsed, axis=-1), rank, axis=-1)
     return result

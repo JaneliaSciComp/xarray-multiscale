@@ -1,6 +1,7 @@
 import dask.array as da
 import numpy as np
 import pytest
+from src.xarray_multiscale.reducers import windowed_rank
 from xarray import DataArray
 from xarray.testing import assert_equal
 
@@ -39,18 +40,14 @@ def test_adjust_shape(size, scale):
     if np.all((old_shape_array % scale_array) == 0):
         assert np.array_equal(new_shape_array, old_shape_array)
     else:
-        assert np.array_equal(
-            new_shape_array, old_shape_array - (old_shape_array % scale_array)
-        )
+        assert np.array_equal(new_shape_array, old_shape_array - (old_shape_array % scale_array))
 
 
 def test_downscale_2d():
     scale = (2, 1)
 
     data = DataArray(
-        np.array(
-            [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"
-        ),
+        np.array([[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], dtype="uint8"),
     )
     answer = DataArray(np.array([[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]))
     downscaled = downscale(data, windowed_mean, scale, preserve_dtype=False)
@@ -122,15 +119,21 @@ def test_multiscale(ndim: int, chained: bool):
     cell = np.zeros(np.prod(chunks)).astype("float")
     cell[0] = 1
     cell = cell.reshape(*chunks)
-    base_array = np.tile(cell, np.ceil(np.divide(shape, chunks)).astype("int"))[
-        cropslice
-    ]
+    base_array = np.tile(cell, np.ceil(np.divide(shape, chunks)).astype("int"))[cropslice]
 
     pyr = multiscale(base_array, windowed_mean, 2, chained=chained)
     assert [p.shape for p in pyr] == [shape, (4,) * ndim, (2,) * ndim]
 
     # check that the first multiscale array is identical to the input data
     assert np.array_equal(pyr[0].data, base_array)
+
+
+@pytest.mark.parametrize("rank", (-1, 0, 1))
+def test_multiscale_rank_kwargs(rank: int):
+    data = np.arange(16)
+    window_size = (4,)
+    pyr = multiscale(data, windowed_rank, window_size, rank=rank)
+    assert np.array_equal(pyr[1].data, windowed_rank(data, window_size=window_size, rank=rank))
 
 
 def test_chunking():
@@ -143,8 +146,7 @@ def test_chunking():
 
     multi = multiscale(base_array, reducer, scale_factors)
     expected_chunks = [
-        np.floor_divide(chunks, [s**idx for s in scale_factors])
-        for idx, m in enumerate(multi)
+        np.floor_divide(chunks, [s**idx for s in scale_factors]) for idx, m in enumerate(multi)
     ]
     expected_chunks = [
         x
@@ -155,34 +157,23 @@ def test_chunking():
         * ndim
         for x in expected_chunks
     ]
-    assert all(
-        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
-    )
+    assert all([np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)])
 
     multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
     expected_chunks = [
-        chunks if np.greater(m.shape, chunks).all() else m.shape
-        for idx, m in enumerate(multi)
+        chunks if np.greater(m.shape, chunks).all() else m.shape for idx, m in enumerate(multi)
     ]
-    assert all(
-        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
-    )
+    assert all([np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)])
 
     chunks = (3, -1, -1)
     multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
-    expected_chunks = [
-        (min(chunks[0], m.shape[0]), m.shape[1], m.shape[2]) for m in multi
-    ]
-    assert all(
-        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
-    )
+    expected_chunks = [(min(chunks[0], m.shape[0]), m.shape[1], m.shape[2]) for m in multi]
+    assert all([np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)])
 
     chunks = 3
     multi = multiscale(base_array, reducer, scale_factors, chunks=chunks)
     expected_chunks = [tuple(min(chunks, s) for s in m.shape) for m in multi]
-    assert all(
-        [np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)]
-    )
+    assert all([np.array_equal(m.data.chunksize, e) for m, e in zip(multi, expected_chunks)])
 
 
 def test_coords():
@@ -203,3 +194,19 @@ def test_coords():
 
     assert_equal(multi[0], array)
     assert_equal(multi[1], downscaled)
+
+
+@pytest.mark.parametrize("template", ("default", "{}"))
+def test_namer(template):
+    from xarray_multiscale.multiscale import _default_namer
+
+    if template == "default":
+        namer = _default_namer
+    else:
+
+        def namer(v):
+            return template.format(v)
+
+    data = np.arange(16)
+    m = multiscale(data, windowed_mean, 2, namer=namer)
+    assert all(element.name == namer(idx) for idx, element in enumerate(m))

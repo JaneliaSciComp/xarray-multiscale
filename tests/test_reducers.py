@@ -64,28 +64,19 @@ def test_windowed_mode():
 
 
 def test_windowed_rank():
-    initial_array = np.array([[[1, 2],
-                               [3, 4]],
-                              [[5, 6],
-                               [7, 8]]])
+    initial_array = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
     larger_array = np.tile(initial_array, (2, 2, 2))
     window_size = (2, 2, 2)
 
     # 2nd brightest voxel
-    rank = np.product(window_size) - 2
-    answer = np.array([[[7, 7],
-                        [7, 7]],
-                       [[7, 7],
-                        [7, 7]]])
+    rank = np.prod(window_size) - 2
+    answer = np.array([[[7, 7], [7, 7]], [[7, 7], [7, 7]]])
     results = windowed_rank(larger_array, window_size, rank)
     assert np.array_equal(results, answer)
 
     # Test negative rank
     rank = -8
-    answer = np.array([[[1, 1],
-                        [1, 1]],
-                       [[1, 1],
-                        [1, 1]]])
+    answer = np.array([[[1, 1], [1, 1]], [[1, 1], [1, 1]]])
     results = windowed_rank(larger_array, window_size, rank)
     assert np.array_equal(results, answer)
 
@@ -108,11 +99,7 @@ def test_reshape_windowed(windows_per_dim: int, window_size: Tuple[int, ...]):
     assert reshaped.shape[0::2] == (windows_per_dim,) * len(window_size)
     assert reshaped.shape[1::2] == window_size
     slice_data = tuple(slice(w) for w in window_size)
-    slice_reshaped = tuple(
-        slice(None) if s % 2 else slice(0, 1) for s in range(reshaped.ndim)
-    )
+    slice_reshaped = tuple(slice(None) if s % 2 else slice(0, 1) for s in range(reshaped.ndim))
     # because we are reshaping the array, if the first window is correct, all the others
     # will be correct too
-    assert np.array_equal(
-        data[slice_data].squeeze(), reshaped[slice_reshaped].squeeze()
-    )
+    assert np.array_equal(data[slice_data].squeeze(), reshaped[slice_reshaped].squeeze())

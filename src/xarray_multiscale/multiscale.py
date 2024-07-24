@@ -1,29 +1,43 @@
-from typing import Any, Dict, Hashable, List, Literal, Sequence, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Hashable, Sequence, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
+import xarray
 from dask.array.core import Array
 from dask.base import tokenize
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import apply
-from xarray import DataArray
 
 from xarray_multiscale.chunks import align_chunks, normalize_chunks
 from xarray_multiscale.reducers import WindowedReducer
 from xarray_multiscale.util import adjust_shape, broadcast_to_rank, logn
 
-ChunkOption = Literal["preserve", "auto"]
+ChunkOption: TypeAlias = Literal["preserve", "auto"]
+
+
+def _default_namer(idx: int) -> str:
+    """
+    The default naming function. Takes an integer index and prepends "s" in front of it.
+    """
+    return f"s{idx}"
 
 
 def multiscale(
     array: npt.NDArray[Any],
     reduction: WindowedReducer,
-    scale_factors: Union[Sequence[int], int],
+    scale_factors: Sequence[int] | int,
     preserve_dtype: bool = True,
-    chunks: Union[str, Sequence[int], Dict[Hashable, int]] = "preserve",
+    chunks: ChunkOption | Sequence[int] | dict[Hashable, int] = "preserve",
     chained: bool = True,
-) -> List[DataArray]:
+    namer: Callable[[int], str] = _default_namer,
+    **kwargs: Any,
+) -> list[xarray.DataArray]:
     """
     Generate a coordinate-aware multiscale representation of an array.
 
@@ -72,11 +86,19 @@ def multiscale(
         power. This means that the nth downscaled array directly depends
         on the input array.
 
+    namer : callable, defaults to `_default_namer`
+        A function for naming the output arrays. This function should take an integer
+        index and return a string. The default function simply prepends the string
+        representation of the integer with the character "s".
+
+    **kwargs: Any
+        Additional keyword arguments that will be passed to the reduction function.
+
     Returns
     -------
-    result : list of DataArrays
+    result : list[xarray.DataArray]
         The first element of this list is the input array, converted to an
-        `xarray.DataArray`. Each subsquent element of the list is
+        `xarray.DataArray`. Each subsequent element of the list is
         the result of downsampling the previous element of the list.
 
         The `coords` attributes of these DataArrays track the changing
@@ -97,11 +119,11 @@ def multiscale(
       * dim_0    (dim_0) float64 0.5 2.5]
     """
     scale_factors = broadcast_to_rank(scale_factors, array.ndim)
-    darray = to_dataarray(array)
+    darray = to_dataarray(array, name=namer(0))
 
     levels = range(1, downsampling_depth(darray.shape, scale_factors))
 
-    result: List[DataArray] = [darray]
+    result: list[xarray.DataArray] = [darray]
     for level in levels:
         if chained:
             scale = scale_factors
@@ -109,7 +131,9 @@ def multiscale(
         else:
             scale = tuple(s**level for s in scale_factors)
             source = result[0]
-        result.append(downscale(source, reduction, scale, preserve_dtype))
+        downscaled = downscale(source, reduction, scale, preserve_dtype, **kwargs)
+        downscaled.name = namer(level)
+        result.append(downscaled)
 
     if darray.chunks is not None and chunks != "preserve":
         new_chunks = [normalize_chunks(r, chunks) for r in result]
@@ -118,45 +142,41 @@ def multiscale(
     return result
 
 
-def to_dataarray(array: Any) -> DataArray:
+def to_dataarray(array: Any, name: str | None = None) -> xarray.DataArray:
     """
-    Convert the input to DataArray if it is not already one.
+    Convert the input to an `xarray.DataArray` if it is not already one.
     """
-    if isinstance(array, DataArray):
+    if isinstance(array, xarray.DataArray):
         data = array.data
         dims = array.dims
         # ensure that key order matches dimension order
         coords = {d: array.coords[d] for d in dims}
         attrs = array.attrs
-        name = array.name
     else:
         data = array
         dims = tuple(f"dim_{d}" for d in range(data.ndim))
         coords = {
-            dim: DataArray(np.arange(shape, dtype="float"), dims=dim)
+            dim: xarray.DataArray(np.arange(shape, dtype="float"), dims=dim)
             for dim, shape in zip(dims, array.shape)
         }
-        name = None
         attrs = {}
 
-    result = DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
+    result = xarray.DataArray(data=data, coords=coords, dims=dims, attrs=attrs, name=name)
     return result
 
 
 def downscale_dask(
     array: Any,
     reduction: WindowedReducer,
-    scale_factors: Union[int, Sequence[int], Dict[int, int]],
+    scale_factors: Sequence[int],
     **kwargs: Any,
 ) -> Any:
-
+    """
+    Downscale a dask array.
+    """
     if not np.all((np.array(array.shape) % np.array(scale_factors)) == 0):
-        raise ValueError(
-            f"""
-            Coarsening factors {scale_factors} do not align
-            with array shape {array.shape}.
-            """
-        )
+        msg = f"Coarsening factors {scale_factors} do not align with array shape {array.shape}."
+        raise ValueError(msg)
 
     array = align_chunks(array, scale_factors)
     name: str = "downscale-" + tokenize(reduction, array, scale_factors)
@@ -169,39 +189,30 @@ def downscale_dask(
         for axis, sizes in enumerate(array.chunks)
     )
 
-    meta = reduction(
-        np.empty(scale_factors, dtype=array.dtype), scale_factors, **kwargs
-    )
+    meta = reduction(np.empty(scale_factors, dtype=array.dtype), scale_factors, **kwargs)
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[array])
     return Array(graph, name, chunks, meta=meta)
 
 
 def downscale(
-    array: DataArray,
+    array: xarray.DataArray,
     reduction: WindowedReducer,
     scale_factors: Sequence[int],
     preserve_dtype: bool = True,
     **kwargs: Any,
-) -> Any:
-
+) -> xarray.DataArray:
     to_downscale = adjust_shape(array, scale_factors)
     if to_downscale.chunks is not None:
-        downscaled_data = downscale_dask(
-            to_downscale.data, reduction, scale_factors, **kwargs
-        )
+        downscaled_data = downscale_dask(to_downscale.data, reduction, scale_factors, **kwargs)
     else:
-        downscaled_data = reduction(to_downscale.data, scale_factors)
+        downscaled_data = reduction(to_downscale.data, scale_factors, **kwargs)
     if preserve_dtype:
         downscaled_data = downscaled_data.astype(array.dtype)
     downscaled_coords = downscale_coords(to_downscale, scale_factors)
-    return DataArray(
-        downscaled_data, downscaled_coords, attrs=array.attrs, dims=array.dims
-    )
+    return xarray.DataArray(downscaled_data, downscaled_coords, attrs=array.attrs, dims=array.dims)
 
 
-def downscale_coords(
-    array: DataArray, scale_factors: Sequence[int]
-) -> Dict[Hashable, Any]:
+def downscale_coords(array: xarray.DataArray, scale_factors: Sequence[int]) -> dict[Hashable, Any]:
     """
     Downscale coordinates by taking the windowed mean of each coordinate array.
     """
@@ -230,9 +241,11 @@ def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> in
 
     Parameters
     ----------
-    shape : sequence of positive integers
+    shape: Sequence[int]
+        An array shape.
 
-    scale_factors : sequence of positive integers
+    scale_factors : Sequence[int]
+        Downsampling factors.
 
     Examples
     --------
@@ -244,12 +257,12 @@ def downsampling_depth(shape: Sequence[int], scale_factors: Sequence[int]) -> in
     2
     """
     if len(shape) != len(scale_factors):
-        raise ValueError(
-            f"""
-            Shape (length == {len(shape)} ) and
-            scale factors (length == {len(scale_factors)})
-            do not align."""
+        msg = (
+            "The shape and scale_factors parameters do not have the same length."
+            f"Shape={shape} has length {len(shape)}, "
+            f"but scale_factors={scale_factors} has length {len(scale_factors)}"
         )
+        raise ValueError(msg)
 
     _scale_factors = np.array(scale_factors).astype("int")
     _shape = np.array(shape).astype("int")
