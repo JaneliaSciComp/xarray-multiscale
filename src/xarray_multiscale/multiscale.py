@@ -36,6 +36,7 @@ def multiscale(
     chunks: ChunkOption | Sequence[int] | dict[Hashable, int] = "preserve",
     chained: bool = True,
     namer: Callable[[int], str] = _default_namer,
+    **kwargs: Any,
 ) -> list[xarray.DataArray]:
     """
     Generate a coordinate-aware multiscale representation of an array.
@@ -90,6 +91,9 @@ def multiscale(
         index and return a string. The default function simply prepends the string
         representation of the integer with the character "s".
 
+    **kwargs: Any
+        Additional keyword arguments that will be passed to the reduction function.
+
     Returns
     -------
     result : list[xarray.DataArray]
@@ -127,7 +131,7 @@ def multiscale(
         else:
             scale = tuple(s**level for s in scale_factors)
             source = result[0]
-        downscaled = downscale(source, reduction, scale, preserve_dtype)
+        downscaled = downscale(source, reduction, scale, preserve_dtype, **kwargs)
         downscaled.name = namer(level)
         result.append(downscaled)
 
@@ -201,7 +205,7 @@ def downscale(
     if to_downscale.chunks is not None:
         downscaled_data = downscale_dask(to_downscale.data, reduction, scale_factors, **kwargs)
     else:
-        downscaled_data = reduction(to_downscale.data, scale_factors)
+        downscaled_data = reduction(to_downscale.data, scale_factors, **kwargs)
     if preserve_dtype:
         downscaled_data = downscaled_data.astype(array.dtype)
     downscaled_coords = downscale_coords(to_downscale, scale_factors)

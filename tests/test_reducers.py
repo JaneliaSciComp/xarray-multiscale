@@ -69,7 +69,7 @@ def test_windowed_rank():
     window_size = (2, 2, 2)
 
     # 2nd brightest voxel
-    rank = np.product(window_size) - 2
+    rank = np.prod(window_size) - 2
     answer = np.array([[[7, 7], [7, 7]], [[7, 7], [7, 7]]])
     results = windowed_rank(larger_array, window_size, rank)
     assert np.array_equal(results, answer)

@@ -1,6 +1,7 @@
 import dask.array as da
 import numpy as np
 import pytest
+from src.xarray_multiscale.reducers import windowed_rank
 from xarray import DataArray
 from xarray.testing import assert_equal
 
@@ -125,6 +126,14 @@ def test_multiscale(ndim: int, chained: bool):
 
     # check that the first multiscale array is identical to the input data
     assert np.array_equal(pyr[0].data, base_array)
+
+
+@pytest.mark.parametrize("rank", (-1, 0, 1))
+def test_multiscale_rank_kwargs(rank: int):
+    data = np.arange(16)
+    window_size = (4,)
+    pyr = multiscale(data, windowed_rank, window_size, rank=rank)
+    assert np.array_equal(pyr[1].data, windowed_rank(data, window_size=window_size, rank=rank))
 
 
 def test_chunking():
