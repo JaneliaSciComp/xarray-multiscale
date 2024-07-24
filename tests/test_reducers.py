@@ -75,11 +75,7 @@ def test_reshape_windowed(windows_per_dim: int, window_size: Tuple[int, ...]):
     assert reshaped.shape[0::2] == (windows_per_dim,) * len(window_size)
     assert reshaped.shape[1::2] == window_size
     slice_data = tuple(slice(w) for w in window_size)
-    slice_reshaped = tuple(
-        slice(None) if s % 2 else slice(0, 1) for s in range(reshaped.ndim)
-    )
+    slice_reshaped = tuple(slice(None) if s % 2 else slice(0, 1) for s in range(reshaped.ndim))
     # because we are reshaping the array, if the first window is correct, all the others
     # will be correct too
-    assert np.array_equal(
-        data[slice_data].squeeze(), reshaped[slice_reshaped].squeeze()
-    )
+    assert np.array_equal(data[slice_data].squeeze(), reshaped[slice_reshaped].squeeze())

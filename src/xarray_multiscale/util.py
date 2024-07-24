@@ -1,6 +1,7 @@
 from typing import Dict, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 from xarray import DataArray
 
 
@@ -32,7 +33,7 @@ def adjust_shape(array: DataArray, scale_factors: Sequence[int]) -> DataArray:
     return result
 
 
-def logn(x: float, n: float) -> float:
+def logn(x: npt.ArrayLike, n: npt.ArrayLike) -> npt.NDArray[np.float64]:
     """
     Compute the logarithm of x base n.
 
@@ -47,7 +48,7 @@ def logn(x: float, n: float) -> float:
         np.log(x) / np.log(n)
 
     """
-    result: float = np.log(x) / np.log(n)
+    result: npt.NDArray[np.float64] = np.log(x) / np.log(n)
     return result
 
 
@@ -66,16 +67,19 @@ def broadcast_to_rank(
         for dim in range(rank):
             result_dict[dim] = value.get(dim, 1)
     else:
-        raise ValueError(
-            f"""The first argument must be an int, a sequence of ints,
-             or a dict of ints. Got {type(value)}"""
+        msg = (  # type: ignore[unreachable]
+            "The first argument must be an integer, a sequence of integers",
+            f"or a dictionary of integers. Got {type(value)}",
         )
+        raise ValueError(msg)
     result = tuple(result_dict.values())
     typecheck = tuple(isinstance(val, int) for val in result)
     if not all(typecheck):
         bad_values = tuple(result[idx] for idx, val in enumerate(typecheck) if not val)
-        raise ValueError(
-            f"""All elements of the first argument of this function
-             must be ints. Found non-integer values: {bad_values}"""
+        msg = (
+            "All elements of the first argument of this function must be integers. "
+            f"Got non-integer values: {bad_values}"
         )
+        raise ValueError(msg)
+
     return result
