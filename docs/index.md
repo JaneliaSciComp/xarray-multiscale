@@ -10,7 +10,38 @@ Simple tools for creating multiscale representations of large images.
 
 Many image processing applications benefit from representing images at multiple scales (also known as [image pyramids](https://en.wikipedia.org/wiki/Pyramid_(image_processing)). This package provides tools for generating lazy multiscale representations of N-dimensional data using [`xarray`](http://xarray.pydata.org/en/stable/) to ensure that the downsampled images have the correct coordinates.
 
-Why are coordinates important for this application? Because a downsampled image is typically scaled and *translated* relative to the source image. Without a coordinate-aware representation of the data, the scaling and translation information is easily lost. 
+### Coordinates matter when you downsample images
+
+It's obvious that downsampling an image applies a scaling transformation, i.e. downsampling increases the distance between image samples. This is the whole purpose of downsampling the image. But it is less obvious that most downsampling operations also apply a *translation transformation* -- downsampling an image (generally) shifts the origin of the output relative to the source. 
+
+In signal processing terms, image downsampling combines an image filtering step (blending local intensities) with a resampling step (sampling intensities at a set of positions in the signal). When you resample an image, you get to choose which points to resample on, and the best choice for most simple downsampling routines is to resample on points that are slightly translated relative to the original image. For simple windowed downsampling, this means that the first element of the downsampled image lies 
+at the center (i.e., the mean) of the coordinate values of the window. 
+
+We can illustrate this with some simple examples:
+
+```
+2x windowed downsampling, in one dimension: 
+
+source coordinates:        | 0 | 1 | 
+downsampled coordinates:   |  0.5  | 
+```
+
+```
+3x windowed downsampling, in two dimensions: 
+
+source coordinates:        | (0,0) | (0,1) | (0,2) |
+                           | (1,0) | (1,1) | (1,2) |
+                           | (2,0) | (2,1) | (2,2) |
+
+downsampled coordinates:   |                       |        
+                           |         (1,1)         |
+                           |                       | 
+
+```
+
+Another way of thinking about this is that if you downsample an arbitrarily large image to a single value, then the only sensible place to localize that value is at the center of the image. Thus, incrementally downsampling slightly shifts the downsampled image toward that point.
+
+Why should you care? If you work with images where the coordinates matter (for example, images recorded from scientific instruments), then you should care about keeping track of those coordinates. Tools like numpy or scikit-image make it very easy to ignore the coordinates of your image. These tools model images as simple arrays, and from the array perspective `data[0,0]` and `downsampled_data[0,0]` lie on the same position in space because they take the same array index. However, `downsampled_data[0,0]` is almost certainly shifted relative to `data[0,0]`. Coordinate-blind tools like `scikit-image` force your to track the coordinates on your own, which is a recipe for mistakes. This is the value of `xarray`. By explicitly modelling coordinates alongside data values, `xarray` ensures that you never lose track of where your data comes from, which is why `xarray-multiscale` uses it.
 
 ### Who needs this
 
