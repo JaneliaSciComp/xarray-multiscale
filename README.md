@@ -8,7 +8,7 @@ Simple tools for creating multiscale representations of large images.
 
 ## Motivation
 
-Many image processing applications benefit from representing images at multiple scales (also known as [image pyramids] (https://en.wikipedia.org/wiki/Pyramid_(image_processing)). This package provides tools for generating lazy multiscale representations of N-dimensional data using [`xarray`](http://xarray.pydata.org/en/stable/) to ensure that the downsampled images have the correct axis coordinates.
+Many image processing applications benefit from representing images at multiple scales (also known as [image pyramids](https://en.wikipedia.org/wiki/Pyramid_(image_processing)). This package provides tools for generating lazy multiscale representations of N-dimensional data using [`xarray`](http://xarray.pydata.org/en/stable/) to ensure that the downsampled images have the correct axis coordinates.
 
 Why are coordinates important for this application? Because a downsampled image is typically scaled and *translated* relative to the source image. Without a coordinate-aware representation of the data, the scaling and translation information is easily lost. 
 
