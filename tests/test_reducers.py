@@ -10,6 +10,7 @@ from xarray_multiscale.reducers import (
     windowed_mean,
     windowed_min,
     windowed_mode,
+    windowed_rank,
 )
 
 
@@ -60,6 +61,29 @@ def test_windowed_mode():
     answer = np.array([[1, 0], [0, 2]])
     results = windowed_mode(data, (2, 2))
     assert np.array_equal(results, answer)
+
+
+def test_windowed_rank():
+    initial_array = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    larger_array = np.tile(initial_array, (2, 2, 2))
+    window_size = (2, 2, 2)
+
+    # 2nd brightest voxel
+    rank = np.product(window_size) - 2
+    answer = np.array([[[7, 7], [7, 7]], [[7, 7], [7, 7]]])
+    results = windowed_rank(larger_array, window_size, rank)
+    assert np.array_equal(results, answer)
+
+    # Test negative rank
+    rank = -8
+    answer = np.array([[[1, 1], [1, 1]], [[1, 1], [1, 1]]])
+    results = windowed_rank(larger_array, window_size, rank)
+    assert np.array_equal(results, answer)
+
+    # Test out-of-bounds rank
+    rank = 100
+    with pytest.raises(ValueError):
+        windowed_rank(larger_array, window_size, rank)
 
 
 @pytest.mark.parametrize("windows_per_dim", (1, 2, 3, 4, 5))

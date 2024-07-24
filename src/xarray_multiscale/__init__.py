@@ -5,7 +5,7 @@ from .reducers import (
     windowed_max,
     windowed_mean,
     windowed_min,
-    windowed_mode,
+    windowed_rank,
 )
 
 __all__ = [
@@ -15,4 +15,5 @@ __all__ = [
     "windowed_mode",
     "windowed_max",
     "windowed_min",
+    "windowed_rank",
 ]
