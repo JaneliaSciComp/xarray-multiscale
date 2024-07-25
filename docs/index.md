@@ -193,7 +193,7 @@ Coordinates:
 
 - Arrays that are not evenly divisible by the downsampling factors will be trimmed as needed. If this behavior is undesirable, consider padding your array appropriately prior to downsampling.
 - For chunked arrays (e.g., dask arrays), the current implementation divides the input data into *contiguous* chunks. This means that attempting to use downsampling schemes based on sliding windowed smoothing will produce edge artifacts.
-- `multiscale` generates a sequence of arrays of descending size, where the smallest array is the last 
+- The [`multiscale`](api/multiscale/#xarray_multiscale.multiscale.multiscale) function in this library stops downsampling when a subqsequent downsampling operation would create an array where any axis has length 1. This is because I work with bioimaging data, and for bioimaging data we often want to represent the coordinates of an array with a translation transformation and a scaling transformation. But scaling and translation cannot both be estimated for a single point, so `multiscale` avoids creating arrays with singleton dimensions.
 
 ### Development
 
