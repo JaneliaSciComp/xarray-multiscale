@@ -778,7 +778,7 @@ The <code>multiscale</code> function also accepts <code>DataArray</code> objects
 <ul>
 <li>Arrays that are not evenly divisible by the downsampling factors will be trimmed as needed. If this behavior is undesirable, consider padding your array appropriately prior to downsampling.</li>
 <li>For chunked arrays (e.g., dask arrays), the current implementation divides the input data into <em>contiguous</em> chunks. This means that attempting to use downsampling schemes based on sliding windowed smoothing will produce edge artifacts.</li>
-<li><code>multiscale</code> generates a sequence of arrays of descending size, where the smallest array is the last </li>
+<li>The <a href="api/multiscale/#xarray_multiscale.multiscale.multiscale"><code>multiscale</code></a> function in this library stops downsampling when a subqsequent downsampling operation would create an array where any axis has length 1. This is because I work with bioimaging data, and for bioimaging data we often want to represent the coordinates of an array with a translation transformation and a scaling transformation. But scaling and translation cannot both be estimated for a single point, so <code>multiscale</code> avoids creating arrays with singleton dimensions.</li>
 </ul>
 <h4 id="development">Development<a class="headerlink" href="#development" title="Permanent link">#</a></h4>
 <p>This project is developed using <a href="https://hatch.pypa.io/latest/"><code>hatch</code></a>. 
