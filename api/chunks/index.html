@@ -502,12 +502,11 @@
 
 
 <a id="xarray_multiscale.chunks"></a>
-  <div class="doc doc-contents first">
+    <div class="doc doc-contents first">
 
-  
+
 
   <div class="doc doc-children">
-
 
 
 
@@ -520,90 +519,87 @@
 <div class="doc doc-object doc-function">
 
 
-
 <h2 id="xarray_multiscale.chunks.normalize_chunks" class="doc doc-heading">
-          <span class="doc doc-object-name doc-function-name">normalize_chunks</span>
+            <span class="doc doc-object-name doc-function-name">normalize_chunks</span>
 
 
 <a href="#xarray_multiscale.chunks.normalize_chunks" class="headerlink" title="Permanent link">#</a></h2>
 <div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">normalize_chunks</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">)</span>
 </span></code></pre></div>
 
-  <div class="doc doc-contents ">
-  
+    <div class="doc doc-contents ">
+
       <p>Given an <code>xarray.DataArray</code>, normalize a chunk size against that array.</p>
 
 
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
         <tr>
-          <td><code>array</code></td>
-          <td>
-                <code><span title="xarray.DataArray">DataArray</span></code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>An <code>xarray.DataArray</code>.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
         </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>array</code></td>
+            <td>
+                  <code><span title="xarray.DataArray">DataArray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>An <code>xarray.DataArray</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>chunk_size</code></td>
+            <td>
+                  <code>str | int | <span title="typing.Sequence">Sequence</span>[int] | dict[<span title="typing.Hashable">Hashable</span>, int]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A specification of a chunk size.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
         <tr>
-          <td><code>chunk_size</code></td>
-          <td>
-                <code>str | int | <span title="typing.Sequence">Sequence</span>[int] | dict[<span title="typing.Hashable">Hashable</span>, int]</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>A specification of a chunk size.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
+          <th>Type</th>
+          <th>Description</th>
         </tr>
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>dict[<span title="typing.Hashable">Hashable</span>, int]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>An xarray-compatible specification of chunk sizes.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td>
-                <code>dict[<span title="typing.Hashable">Hashable</span>, int]</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>An xarray-compatible specification of chunk sizes.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-          <details class="quote">
-            <summary>Source code in <code>src/xarray_multiscale/chunks.py</code></summary>
-            <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-15">15</a></span>
+            <details class="quote">
+              <summary>Source code in <code>src/xarray_multiscale/chunks.py</code></summary>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-15">15</a></span>
 <span class="normal"><a href="#__codelineno-0-16">16</a></span>
 <span class="normal"><a href="#__codelineno-0-17">17</a></span>
 <span class="normal"><a href="#__codelineno-0-18">18</a></span>
@@ -703,32 +699,30 @@
 </span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63"></a>
 </span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64"></a>    <span class="k">return</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="n">new_chunks</span><span class="p">[</span><span class="n">array</span><span class="o">.</span><span class="n">get_axis_num</span><span class="p">(</span><span class="n">dim</span><span class="p">)]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">array</span><span class="o">.</span><span class="n">dims</span><span class="p">}</span>
 </span></code></pre></div></td></tr></table></div>
-          </details>
-  </div>
+            </details>
+    </div>
 
 </div>
-
 
 <div class="doc doc-object doc-function">
 
 
-
 <h2 id="xarray_multiscale.chunks.align_chunks" class="doc doc-heading">
-          <span class="doc doc-object-name doc-function-name">align_chunks</span>
+            <span class="doc doc-object-name doc-function-name">align_chunks</span>
 
 
 <a href="#xarray_multiscale.chunks.align_chunks" class="headerlink" title="Permanent link">#</a></h2>
 <div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">align_chunks</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">scale_factors</span><span class="p">)</span>
 </span></code></pre></div>
 
-  <div class="doc doc-contents ">
-  
+    <div class="doc doc-contents ">
+
       <p>Ensure that all chunks of a dask array are divisible by scale_factors, rechunking the array
 if necessary.</p>
 
-          <details class="quote">
-            <summary>Source code in <code>src/xarray_multiscale/chunks.py</code></summary>
-            <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-67">67</a></span>
+            <details class="quote">
+              <summary>Source code in <code>src/xarray_multiscale/chunks.py</code></summary>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-67">67</a></span>
 <span class="normal"><a href="#__codelineno-0-68">68</a></span>
 <span class="normal"><a href="#__codelineno-0-69">69</a></span>
 <span class="normal"><a href="#__codelineno-0-70">70</a></span>
@@ -754,8 +748,8 @@ if necessary.</p>
 </span><span id="__span-0-78"><a id="__codelineno-0-78" name="__codelineno-0-78"></a>        <span class="n">array</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">rechunk</span><span class="p">(</span><span class="n">new_chunks</span><span class="p">)</span>
 </span><span id="__span-0-79"><a id="__codelineno-0-79" name="__codelineno-0-79"></a>    <span class="k">return</span> <span class="n">array</span>
 </span></code></pre></div></td></tr></table></div>
-          </details>
-  </div>
+            </details>
+    </div>
 
 </div>
 
@@ -763,7 +757,7 @@ if necessary.</p>
 
   </div>
 
-  </div>
+    </div>
 
 </div>
 
