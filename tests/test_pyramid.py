@@ -386,3 +386,187 @@ def test_ome_dialect_multivar_error(tmp_path):
     ms = make_pyramid(n_levels=2, extra_var=True)
     with pytest.raises(ValueError, match="exactly one data variable"):
         ms.to_zarr(str(tmp_path / "x.zarr"), dialects=("xarray", "ome-ngff"))
+
+
+# ----------------------------------------------------------------------
+# functional (transform-backed) coordinates
+# ----------------------------------------------------------------------
+pytest.importorskip("xarray.indexes", reason="needs xarray with functional coords")
+from xarray.indexes import CoordinateTransformIndex, RangeIndex  # noqa: E402
+
+from xarray_multiscale.pyramid import _functional_coords  # noqa: E402
+
+
+def write_ome_store(path, sizes, scales, translations, n_levels=3, factor=2):
+    """A store carrying ONLY OME-NGFF metadata: no coordinate arrays."""
+    root = zarr.open_group(path, mode="w")
+    datasets = []
+    for i in range(n_levels):
+        shape = tuple(max(1, n // factor**i) for n in sizes.values())
+        arr = root.create_array(f"{i}", shape=shape, dtype="uint8", chunks=shape)
+        arr[:] = i
+        lvl_scale = [scales[d] * factor**i for d in sizes]
+        # cell-centered: the level's origin shifts by half the extra width
+        lvl_trans = [
+            translations[d] + (scales[d] * (factor**i - 1)) / 2 for d in sizes
+        ]
+        datasets.append(
+            {
+                "path": f"{i}",
+                "coordinateTransformations": [
+                    {"type": "scale", "scale": lvl_scale},
+                    {"type": "translation", "translation": lvl_trans},
+                ],
+            }
+        )
+    root.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "name": "nuclei",
+            "axes": [{"name": d, "type": "space"} for d in sizes],
+            "datasets": datasets,
+        }
+    ]
+    return path
+
+
+def test_ome_coords_are_functional(tmp_path):
+    store = write_ome_store(
+        str(tmp_path / "ome.zarr"),
+        sizes={"z": 64, "y": 256, "x": 256},
+        scales={"z": 0.5, "y": 0.18, "x": 0.18},
+        translations={"z": 0.25, "y": 0.09, "x": 0.09},
+    )
+    ms = open_multiscale(store)
+
+    # coordinates are declared, not materialized
+    for name, ds in ms.items():
+        for dim in ("z", "y", "x"):
+            assert isinstance(ds.xindexes[dim], CoordinateTransformIndex), (
+                f"{name}/{dim} is not functional"
+            )
+            assert not isinstance(ds.coords[dim].variable._data, np.ndarray)
+
+    # ... and the declared parameters come back exactly, not by differencing
+    assert ms.transform(0) == {
+        "scale": {"z": 0.5, "y": 0.18, "x": 0.18},
+        "translate": {"z": 0.25, "y": 0.09, "x": 0.09},
+    }
+    assert ms.scales["1"] == {"z": 1.0, "y": 0.36, "x": 0.36}
+    assert ms.is_consistent()
+
+
+def test_exact_scale_beats_differencing():
+    """The transform is exact where differencing stored floats is not."""
+    n, scale, trans = 256, 0.18, 0.09
+    coords = _functional_coords(["x"], [n], [scale], [trans])
+    ds = xr.DataArray(np.zeros(n), dims="x", coords=coords, name="v").to_dataset()
+    ms = Multiscale.from_datasets([ds])
+
+    assert ms.scales["0"]["x"] == scale  # exactly, not approximately
+    differenced = float(np.diff(ds.coords["x"].values[:2])[0])
+    assert differenced != scale  # the drift this avoids is real
+    assert differenced == pytest.approx(scale)
+
+
+def test_functional_coords_are_not_materialized():
+    """An axis of any length costs nothing: 1e9 samples, no allocation."""
+    n = 1_000_000_000
+    ds = xr.Dataset(coords=_functional_coords(["q"], [n], [2.5], [1.0]))
+    ms = Multiscale.from_datasets([ds])
+
+    assert ms.scales["0"]["q"] == 2.5
+    assert ms.transform(0)["translate"]["q"] == 1.0
+    assert ms.finest.sizes["q"] == n
+
+
+def test_sel_on_functional_coords(tmp_path):
+    store = write_ome_store(
+        str(tmp_path / "ome.zarr"),
+        sizes={"z": 64, "y": 256, "x": 256},
+        scales={"z": 0.5, "y": 0.18, "x": 0.18},
+        translations={"z": 0.25, "y": 0.09, "x": 0.09},
+    )
+    ms = open_multiscale(store)
+
+    # plain xarray requires method='nearest' on a transform-backed index;
+    # Multiscale supplies it, so the natural expression works
+    roi = ms.sel(y=slice(1.0, 5.0), x=slice(1.0, 5.0))
+    assert isinstance(roi, Multiscale)
+    assert roi["0"].sizes == {"z": 64, "y": 22, "x": 22}
+    # coords stay functional through selection
+    assert isinstance(roi["0"].xindexes["x"], CoordinateTransformIndex)
+
+    # mixed point and slice selection, plus a level policy
+    plane = ms.sel(z=16.0, y=slice(1.0, 5.0), resolution={"x": 0.5, "y": 0.5})
+    assert isinstance(plane, xr.Dataset)
+    assert "z" not in plane.dims
+    assert plane.sizes["x"] == 128
+
+
+def test_sel_mixed_functional_and_explicit_coords():
+    """
+    The case plain xarray cannot express in one call: a slice on an explicit
+    coordinate together with a selection on a functional one.
+    """
+    n = 256
+    ds = xr.Dataset(
+        {"v": (("t", "x"), np.zeros((10, n)))},
+        coords={"t": np.arange(10.0)},
+    ).assign_coords(_functional_coords(["x"], [n], [0.18], [0.09]))
+    assert isinstance(ds.xindexes["x"], CoordinateTransformIndex)
+    assert not isinstance(ds.xindexes["t"], CoordinateTransformIndex)
+
+    # plain xarray: one method for the whole call satisfies neither index
+    with pytest.raises(ValueError, match="nearest"):
+        ds.sel(t=slice(2.0, 5.0), x=slice(1.0, 5.0))
+
+    ms = Multiscale.from_datasets([ds])
+    got = ms.sel(t=slice(2.0, 5.0), x=slice(1.0, 5.0))
+    assert got["0"].sizes == {"t": 4, "x": 22}
+
+    # point selection with a method still reaches the explicit coordinate
+    got = ms.sel(t=2.2, x=1.0, method="nearest")
+    assert got["0"].sizes == {}
+
+
+def test_sel_functional_unsupported_method_error():
+    ds = xr.Dataset(
+        {"v": ("x", np.zeros(16))},
+        coords=_functional_coords(["x"], [16], [0.5], [0.25]),
+    )
+    ms = Multiscale.from_datasets([ds])
+    with pytest.raises(ValueError, match="only method='nearest'"):
+        ms.sel(x=1.0, method="pad")
+
+
+def test_sel_functional_tolerance_error():
+    ds = xr.Dataset(
+        {"v": ("x", np.zeros(16))},
+        coords=_functional_coords(["x"], [16], [0.5], [0.25]),
+    )
+    ms = Multiscale.from_datasets([ds])
+    with pytest.raises(ValueError, match="tolerance"):
+        ms.sel(x=1.0, tolerance=0.1)
+
+
+def test_ome_transform_roundtrip_is_exact(tmp_path):
+    """OME transforms -> functional coords -> OME transforms, unchanged."""
+    scales = {"z": 0.5, "y": 0.18, "x": 0.18}
+    translations = {"z": 0.25, "y": 0.09, "x": 0.09}
+    store = write_ome_store(
+        str(tmp_path / "in.zarr"),
+        sizes={"z": 8, "y": 64, "x": 64},
+        scales=scales,
+        translations=translations,
+        n_levels=2,
+    )
+    ms = open_multiscale(store)
+    emitted = ms._ome_manifest(name="nuclei")
+
+    original = zarr.open_group(store, mode="r").attrs["multiscales"][0]["datasets"]
+    for orig, new in zip(original, emitted["datasets"]):
+        o_scale, o_trans = orig["coordinateTransformations"]
+        n_scale, n_trans = new["coordinateTransformations"]
+        assert n_scale["scale"] == o_scale["scale"]
+        assert n_trans["translation"] == o_trans["translation"]

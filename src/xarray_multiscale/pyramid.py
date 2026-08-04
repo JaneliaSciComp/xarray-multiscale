@@ -26,6 +26,15 @@ from typing import Any, Callable
 import numpy as np
 import xarray as xr
 
+try:  # functional coordinates, xarray >= 2025.03
+    from xarray.indexes import CoordinateTransformIndex, RangeIndex
+
+    HAS_FUNCTIONAL_COORDS = True
+except ImportError:  # pragma: no cover - depends on the installed xarray
+    CoordinateTransformIndex = ()  # type: ignore[assignment]
+    RangeIndex = None  # type: ignore[assignment]
+    HAS_FUNCTIONAL_COORDS = False
+
 __all__ = ["Multiscale", "open_multiscale"]
 
 # key under which the manifest is stored in zarr group attributes
@@ -52,18 +61,61 @@ def _as_dataset(obj: xr.Dataset | xr.DataArray) -> xr.Dataset:
     raise TypeError(f"Expected Dataset or DataArray, got {type(obj)}")
 
 
+def _transform_index(ds: xr.Dataset, dim: Hashable) -> Any:
+    """
+    The functional (transform-backed) index for ``dim``, or None if the
+    coordinate is stored as explicit values.
+
+    A functional coordinate is *declared* — by a scale and translation, as in
+    OME-NGFF — rather than materialized. Its values are computed on demand,
+    so the exact sampling parameters are available without touching an array.
+    """
+    if not HAS_FUNCTIONAL_COORDS:
+        return None
+    idx = ds.xindexes.get(dim)
+    return idx if isinstance(idx, CoordinateTransformIndex) else None
+
+
+def _usable_coord(ds: xr.Dataset, dim: Hashable) -> bool:
+    if dim not in ds.coords or ds.sizes[dim] < 1:
+        return False
+    coord = ds.coords[dim]
+    return coord.ndim == 1 and np.issubdtype(coord.dtype, np.number)
+
+
+def _probe(ds: xr.Dataset, dim: Hashable, positions: Sequence[int]) -> np.ndarray:
+    """
+    Coordinate values at a few integer positions, without materializing the
+    whole coordinate. Positional indexing of a functional coordinate only
+    evaluates the requested points, so this stays cheap for enormous
+    dimensions.
+    """
+    return np.asarray(ds.coords[dim][list(positions)].values, dtype="float64")
+
+
 def _spacings(ds: xr.Dataset) -> dict[Hashable, float]:
     """
-    Mean absolute spacing of each 1-D dimension coordinate with at least
-    two samples. Dimensions without a coordinate, or of length < 2, are
-    omitted (their spacing is unknowable from the data).
+    Mean absolute spacing of each 1-D numeric dimension coordinate with at
+    least two samples. Dimensions without a usable coordinate, or of length
+    < 2, are omitted: their spacing is unknowable from the data.
+
+    For a functional coordinate the spacing is read off the transform, which
+    is *exact* — the differencing of stored float values that this replaces is
+    the long-standing source of scale drift when round-tripping OME-NGFF
+    transforms. Otherwise it is derived from the endpoints, which telescopes
+    to the mean of the differences without reading the interior.
     """
     out: dict[Hashable, float] = {}
     for dim in ds.dims:
-        if dim in ds.coords and ds.sizes[dim] >= 2:
-            coord = np.asarray(ds.coords[dim].values)
-            if coord.ndim == 1 and np.issubdtype(coord.dtype, np.number):
-                out[dim] = float(np.abs(np.diff(coord).mean()))
+        if not _usable_coord(ds, dim) or ds.sizes[dim] < 2:
+            continue
+        idx = _transform_index(ds, dim)
+        step = getattr(idx, "step", None)
+        if step is not None:
+            out[dim] = abs(float(step))
+        else:
+            first, last = _probe(ds, dim, [0, -1])
+            out[dim] = abs(last - first) / (ds.sizes[dim] - 1)
     return out
 
 
@@ -73,24 +125,93 @@ def _extent(ds: xr.Dataset, dim: Hashable) -> tuple[float, float] | None:
     the center of a cell whose width is the local spacing, and the extent is
     the union of all cells. Returns None if the extent is unknowable.
     """
-    if dim not in ds.coords or ds.sizes[dim] < 2:
+    if not _usable_coord(ds, dim) or ds.sizes[dim] < 2:
         return None
-    coord = np.asarray(ds.coords[dim].values, dtype="float64")
-    lo = coord[0] - (coord[1] - coord[0]) / 2
-    hi = coord[-1] + (coord[-1] - coord[-2]) / 2
+    first, second, penultimate, last = _probe(ds, dim, [0, 1, -2, -1])
+    lo = first - (second - first) / 2
+    hi = last + (last - penultimate) / 2
     return (min(lo, hi), max(lo, hi))
 
 
 def _direction(ds: xr.Dataset, dim: Hashable) -> int:
-    """+1 for increasing, -1 for decreasing, 0 for unknown."""
-    if dim not in ds.coords or ds.sizes[dim] < 2:
+    """
+    +1 for increasing, -1 for decreasing, 0 for unknown. Raises if the
+    coordinate is not monotonic.
+
+    A functional coordinate is monotonic by construction, so its direction is
+    the sign of its step; checking every value would defeat the point of not
+    materializing it.
+    """
+    if not _usable_coord(ds, dim) or ds.sizes[dim] < 2:
         return 0
+    step = getattr(_transform_index(ds, dim), "step", None)
+    if step is not None:
+        return 1 if step > 0 else -1
     diffs = np.diff(np.asarray(ds.coords[dim].values))
     if np.all(diffs > 0):
         return 1
     if np.all(diffs < 0):
         return -1
     raise ValueError(f"coordinate {dim!r} is not monotonic")
+
+
+def _sel_dataset(
+    ds: xr.Dataset,
+    indexers: Mapping[Hashable, Any],
+    method: str | None = None,
+    tolerance: Any = None,
+) -> xr.Dataset:
+    """
+    Label-based selection that works uniformly over functional and explicit
+    coordinates.
+
+    Xarray applies one ``method`` to a whole ``sel`` call, but the two kinds
+    of coordinate want different ones: a transform-backed index resolves
+    labels by inverting its transform and accepts only ``method="nearest"``,
+    while a pandas index rejects ``method`` outright when the indexer is a
+    slice. A dataset holding both kinds — an OME image with functional x/y/z
+    and an explicit channel or time axis — therefore cannot be selected in a
+    single call. Splitting the indexers by index type makes the natural
+    expression work.
+
+    ``method`` and ``tolerance`` apply to point selections on explicit
+    coordinates; for interval (slice) selection they carry no meaning.
+    """
+    if not indexers:
+        return ds
+
+    functional = {k: v for k, v in indexers.items() if _transform_index(ds, k) is not None}
+    plain = {k: v for k, v in indexers.items() if k not in functional}
+
+    result = ds
+    if plain:
+        slices = {k: v for k, v in plain.items() if isinstance(v, slice)}
+        points = {k: v for k, v in plain.items() if k not in slices}
+        if slices:
+            result = result.sel(slices)
+        if points:
+            kwargs: dict[str, Any] = {}
+            if method is not None:
+                kwargs["method"] = method
+            if tolerance is not None:
+                kwargs["tolerance"] = tolerance
+            result = result.sel(points, **kwargs)
+
+    if functional:
+        if method not in (None, "nearest"):
+            raise ValueError(
+                f"coordinates {sorted(map(str, functional))} are functional "
+                f"(transform-backed) and support only method='nearest', "
+                f"not {method!r}"
+            )
+        if tolerance is not None:
+            raise ValueError(
+                f"coordinates {sorted(map(str, functional))} are functional "
+                "(transform-backed) and do not support a tolerance"
+            )
+        result = result.sel(functional, method="nearest")
+
+    return result
 
 
 def _validate_levels(levels: Mapping[str, xr.Dataset]) -> None:
@@ -260,19 +381,23 @@ class Multiscale(Mapping):
 
         Only dimensions with a numeric 1-D coordinate of length >= 2 appear in
         ``scale``; ``translate`` includes any dimension with a coordinate.
-        ``precision`` rounds both, which is usually necessary when the
-        spacing is recovered from float coordinates that were themselves
-        computed (the ``coords[1] - coords[0]`` problem).
+
+        Where a coordinate is *functional* (declared by a transform rather
+        than stored as values), the parameters are read back exactly. Where
+        it is stored as explicit values, the scale is recovered by
+        differencing and is subject to float drift; ``precision`` rounds both
+        to compensate.
         """
         ds = self[level]
         scale = _spacings(ds)
-        translate = {
-            dim: float(np.asarray(ds.coords[dim].values)[0])
-            for dim in ds.dims
-            if dim in ds.coords
-            and ds.sizes[dim] >= 1
-            and np.issubdtype(np.asarray(ds.coords[dim].values).dtype, np.number)
-        }
+        translate = {}
+        for dim in ds.dims:
+            if not _usable_coord(ds, dim):
+                continue
+            start = getattr(_transform_index(ds, dim), "start", None)
+            translate[dim] = (
+                float(start) if start is not None else float(_probe(ds, dim, [0])[0])
+            )
         if precision is not None:
             scale = {k: round(v, precision) for k, v in scale.items()}
             translate = {k: round(v, precision) for k, v in translate.items()}
@@ -347,14 +472,9 @@ class Multiscale(Mapping):
             )
 
         indexers = dict(indexers or {}) | dict(indexers_kwargs)
-        sel_kwargs: dict[str, Any] = {}
-        if method is not None:
-            sel_kwargs["method"] = method
-        if tolerance is not None:
-            sel_kwargs["tolerance"] = tolerance
 
         def _apply(ds: xr.Dataset) -> xr.Dataset:
-            return ds.sel(indexers, **sel_kwargs) if indexers else ds
+            return _sel_dataset(ds, indexers, method=method, tolerance=tolerance)
 
         if level is not None:
             return _apply(self[level])
@@ -672,6 +792,52 @@ def open_multiscale(
     )
 
 
+def _functional_coords(
+    dims: Sequence[str],
+    shape: Sequence[int],
+    scale: Sequence[float],
+    translation: Sequence[float],
+) -> xr.Coordinates | dict[Hashable, Any]:
+    """
+    Build coordinates for one level from its affine parameters.
+
+    OME-NGFF declares coordinates as a function of the array index — a scale
+    and a translation per axis — rather than storing them. Xarray's functional
+    coordinates express exactly that, so the declaration is carried straight
+    through instead of being evaluated into arrays: the values are computed on
+    demand, the transform parameters stay exact and recoverable, and an axis
+    of any length costs nothing to represent.
+
+    Falls back to materialized coordinates when the installed xarray predates
+    functional coordinates.
+    """
+    if not HAS_FUNCTIONAL_COORDS:
+        return {
+            dim: t + s * np.arange(n, dtype="float64")
+            for dim, s, t, n in zip(dims, scale, translation, shape)
+        }
+
+    variables: dict[Hashable, Any] = {}
+    indexes: dict[Hashable, Any] = {}
+    for dim, s, t, n in zip(dims, scale, translation, shape):
+        if n < 1 or s == 0:
+            # a degenerate axis has no transform to speak of
+            variables[dim] = xr.Variable(
+                (dim,), t + s * np.arange(n, dtype="float64")
+            )
+            continue
+        # endpoint=False fixes the sample count at exactly n, which arange
+        # cannot guarantee for a stop derived by float arithmetic
+        index = RangeIndex.linspace(t, t + n * s, n, endpoint=False, dim=dim)
+        coord = xr.Coordinates.from_xindex(index)
+        # note: merging Coordinates objects, or assigning their variables one
+        # at a time, silently drops the indexes -- they must be carried
+        # alongside the variables explicitly
+        variables.update(coord.variables)
+        indexes.update(coord.xindexes)
+    return xr.Coordinates(coords=variables, indexes=indexes)
+
+
 def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Multiscale:
     import dask.array as da
     import zarr
@@ -695,10 +861,7 @@ def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Mult
             elif tf["type"] == "translation":
                 translation = [t + g for t, g in zip(translation, tf["translation"])]
 
-        coords = {
-            dim: t + s * np.arange(n, dtype="float64")
-            for dim, s, t, n in zip(dims, scale, translation, data.shape)
-        }
+        coords = _functional_coords(dims, data.shape, scale, translation)
         datasets.append(
             xr.DataArray(data, dims=dims, coords=coords, name=var_name).to_dataset()
         )

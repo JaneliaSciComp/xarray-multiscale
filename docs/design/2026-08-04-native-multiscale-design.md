@@ -1,7 +1,8 @@
 # A native multiscale representation for xarray
 
-*Design draft, 2026-08-04. Status: exploratory — semantics and API converged in
-discussion; nothing here is implemented.*
+*Design draft, 2026-08-04. Status: implemented in
+`src/xarray_multiscale/pyramid.py`; the workflows below are runnable as
+`examples/workflows.py`. The open questions at the end remain open.*
 
 ## Problem
 
@@ -132,8 +133,8 @@ ms.levels            # tuple of level names, fine -> coarse
 ms.level(n), ms[n]   # -> Dataset (plain; projection loses nothing)
 ms.finest, ms.coarsest
 ms.scales            # {level: {dim: spacing}} — discovery is the repr
-ms.transform(level)  # {"scale": {...}, "translation": {...}} derived from coords
-                     #   under cell semantics, with explicit precision control
+ms.transform(level)  # {"scale": {...}, "translate": {...}}: exact for functional
+                     #   coords, derived by differencing for explicit ones
 ms.items(), ms.values()  # mapping protocol over (name, Dataset)
 ```
 
@@ -248,6 +249,61 @@ Properties this buys:
    a manifest whose targets moved is a validation error rather than an
    impossibility.
 
+### Functional coordinates
+
+OME-NGFF does not store coordinates; it *declares* them, as a scale and a
+translation per axis. Xarray's functional coordinates
+(``xarray.indexes.RangeIndex`` over a ``CoordinateTransform``, experimental as
+of xarray 2025.03) express the same thing: the coordinate is a function of the
+array index, evaluated on demand. Reading OME therefore carries the
+declaration straight through rather than evaluating it into arrays.
+
+Measured properties of the resulting levels:
+
+- **Nothing is allocated.** A 10^9-sample axis is represented for free;
+  probing four positions out of it takes ~0.6 ms. This matters because the
+  geometry the invariant depends on (spacing, extent, direction) must be
+  computable without touching the data.
+- **The declared parameters come back exactly.** ``index.step`` is ``0.18``
+  where differencing the evaluated coordinates gives ``0.18000000000000002``.
+  This removes the reason xarray-ome-ngff needed a ``transform_precision``
+  knob, and makes the OME transform round-trip exact.
+- **The index survives** arithmetic, ``astype``, ``chunk``, ``sel`` and
+  ``isel`` with slices, so a level stays functional through ``map`` and
+  through selection.
+
+Consequences for the geometry helpers: spacing is read from the transform
+where present, and otherwise derived from the two endpoint values (which
+telescopes to the mean of the differences, so it is both exact and cheap);
+extent needs only four probed positions; and a functional coordinate is
+monotonic by construction, so its direction is the sign of its step rather
+than a scan.
+
+Two frictions in the underlying API that the abstraction absorbs:
+
+1. **Selection method.** A transform-backed index accepts only
+   ``method="nearest"`` — including for slices — while a pandas index
+   *rejects* ``method`` when the indexer is a slice. A level with both kinds
+   of coordinate (functional x/y/z, explicit channel or time) therefore
+   cannot be selected in a single ``sel`` call at all. ``Multiscale.sel``
+   splits the indexers by index type and applies each group appropriately,
+   so ``ms.sel(t=slice(...), x=slice(...))`` works regardless of how each
+   coordinate is represented.
+2. **Index-dropping assembly.** Both ``Coordinates.merge`` and item-assignment
+   (``coords[name] = var``) silently discard the index, yielding coordinates
+   that look right and are no longer functional. Multi-axis coordinates must
+   be built by passing variables and indexes together to the ``Coordinates``
+   constructor.
+
+Not yet resolved: writing. ``to_zarr`` materializes functional coordinates
+into stored arrays, and reopening through the native manifest yields
+``PandasIndex`` coordinates — so a pyramid round-tripped through the native
+convention is no longer functional, even though the OME dialect it emits
+alongside carries the exact transforms. Options are to record the transform
+in the manifest itself, or to omit functionally-declared coordinate arrays on
+write and reconstruct them on read; the latter also produces cleaner
+OME-compatible groups (real OME stores contain only data arrays).
+
 ### Dialects
 
 Other multiscale conventions map onto the manifest rather than being special
@@ -255,9 +311,9 @@ cases of a layout:
 
 - **OME-NGFF** is a read/write dialect. Its `multiscales.datasets[].path` *is*
   a manifest (with an implicit children-only restriction we drop). Reading:
-  `coordinateTransformations` (scale/translation) generate coordinate arrays —
-  lazily via `CoordinateTransform` for large dims — so OME stores without
-  explicit coordinate arrays still get world-coordinate `sel()`. Writing:
+  `coordinateTransformations` (scale/translation) become functional
+  coordinates (see above), so OME stores without explicit coordinate arrays
+  get world-coordinate `sel()` with nothing materialized. Writing:
   `ms.to_zarr(store, dialects=("xarray", "ome-ngff"))` emits OME attrs
   alongside, computed by `ms.transform(level)`, giving napari/viv interop
   without xarray adopting OME's model wholesale.
@@ -471,13 +527,17 @@ Every row is the same missing object.
    usually dask); invariant re-validation must be metadata-only.
 3. **Arithmetic dunders.** How much of the Dataset API to forward through
    `map` (binary ops between two `Multiscale`s with different level sets?).
-4. **Where it incubates.** `xarray.experimental`, or an external package
+4. **Native-manifest round-trip of functional coordinates.** Writing
+   materializes them and reading back through the native manifest yields
+   explicit coordinates; see the "Functional coordinates" section for the two
+   candidate fixes.
+5. **Where it incubates.** `xarray.experimental`, or an external package
    targeting upstreaming (the DataTree path). This repo (xarray-multiscale)
    is a natural incubator for the object + manifest, with the `coarsen`
    constructor it already implements.
-5. **DataTree coupling.** Subclass vs wrapper; how much of DataTree's public
+6. **DataTree coupling.** Subclass vs wrapper; how much of DataTree's public
    surface leaks through (and whether future DataTree semantics changes
    ripple in).
-6. **Manifest schema details.** Versioning, multiple pyramids per manifest,
+7. **Manifest schema details.** Versioning, multiple pyramids per manifest,
    naming, relationship to zarr conventions work and to OME-NGFF's
    collections/bioformats2raw layouts.

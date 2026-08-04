@@ -119,16 +119,27 @@ Multiscale.downscale(img, windowed_mean, (1, 2, 2), depth=2).to_zarr(
 g = zarr.open_group(ome_store, mode="a")
 g.attrs["multiscales"] = [g.attrs["multiscales"][1]]
 
-ms = open_multiscale(ome_store)  # coords generated from scale/translation
+ms = open_multiscale(ome_store)
 print(ms)
 
-# physical selection: one z-plane in microns, at a target resolution
-# (was: arrays['0'] or ['scale0']['image'], then index arithmetic)
-plane = ms.sel(z=16.0, method="nearest", resolution={"x": 0.5, "y": 0.5})
+# OME declares coordinates as a function of the index (scale + translation).
+# They are carried through as functional coordinates rather than evaluated:
+# nothing is allocated, and the declared parameters stay exact.
+from xarray.indexes import CoordinateTransformIndex  # noqa: E402
+
+x = ms.finest.coords["x"]
+print("\nx coord is functional:", isinstance(ms.finest.xindexes["x"], CoordinateTransformIndex))
+print("  materialized?       ", isinstance(x.variable._data, np.ndarray))
+print("  exact scale         ", ms.scales["0/nuclei"]["x"])
+print("  vs differencing     ", float(np.diff(x.values[:2])[0]), "<- the drift this avoids")
+
+# physical selection: one z-plane in microns, at a target resolution.
+# plain xarray would demand method='nearest' here; Multiscale supplies it.
+plane = ms.sel(z=16.0, resolution={"x": 0.5, "y": 0.5})
 print("\n~0.5um plane shape:", dict(plane.sizes))
 
 # viewer handoff (was: scale=[float(d[1]-d[0]) for d in dims] by hand)
-print("napari kwargs:", ms.transform(0, precision=6))
+print("napari kwargs:", ms.transform(0))
 # e.g. viewer.add_image([lvl.nuclei.data for lvl in ms.values()], ...)
 
 print("\nall three workflows: one abstraction, no per-level loops, no magic keys")
