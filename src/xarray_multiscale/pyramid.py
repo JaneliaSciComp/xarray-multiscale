@@ -1,0 +1,708 @@
+"""
+A native representation of multiscale data.
+
+This module provides ``Multiscale``: an ordered collection of
+``xarray.Dataset`` objects ("levels") that are samplings of one signal on a
+shared continuous domain, ordered fine to coarse.
+
+The design is documented in ``docs/design/2026-08-04-native-multiscale-design.md``.
+In short:
+
+- The *structural* invariant (same dims, same variable and coordinate names,
+  monotonic coordinates in a consistent direction, levels ordered fine to
+  coarse) is enforced at construction.
+- The *geometric* invariant (equal domain coverage under cell semantics) is
+  advisory, via :meth:`Multiscale.is_consistent`, because a large fraction of
+  real-world pyramids (``::2`` subsampled images, rounded COG overviews)
+  violate it slightly.
+"""
+from __future__ import annotations
+
+import operator
+import posixpath
+from collections.abc import Hashable, Iterator, Mapping, Sequence
+from typing import Any, Callable
+
+import numpy as np
+import xarray as xr
+
+__all__ = ["Multiscale", "open_multiscale"]
+
+# key under which the manifest is stored in zarr group attributes
+MULTISCALES_KEY = "multiscales"
+# reserved selector kwargs for Multiscale.sel
+_SELECTORS = ("level", "resolution", "shape")
+
+_OME_AXIS_TYPES = {
+    "x": "space",
+    "y": "space",
+    "z": "space",
+    "t": "time",
+    "time": "time",
+    "c": "channel",
+    "channel": "channel",
+}
+
+
+def _as_dataset(obj: xr.Dataset | xr.DataArray) -> xr.Dataset:
+    if isinstance(obj, xr.Dataset):
+        return obj
+    if isinstance(obj, xr.DataArray):
+        return obj.to_dataset(name=obj.name if obj.name is not None else "data")
+    raise TypeError(f"Expected Dataset or DataArray, got {type(obj)}")
+
+
+def _spacings(ds: xr.Dataset) -> dict[Hashable, float]:
+    """
+    Mean absolute spacing of each 1-D dimension coordinate with at least
+    two samples. Dimensions without a coordinate, or of length < 2, are
+    omitted (their spacing is unknowable from the data).
+    """
+    out: dict[Hashable, float] = {}
+    for dim in ds.dims:
+        if dim in ds.coords and ds.sizes[dim] >= 2:
+            coord = np.asarray(ds.coords[dim].values)
+            if coord.ndim == 1 and np.issubdtype(coord.dtype, np.number):
+                out[dim] = float(np.abs(np.diff(coord).mean()))
+    return out
+
+
+def _extent(ds: xr.Dataset, dim: Hashable) -> tuple[float, float] | None:
+    """
+    Domain coverage of ``dim`` under cell semantics: each coordinate value is
+    the center of a cell whose width is the local spacing, and the extent is
+    the union of all cells. Returns None if the extent is unknowable.
+    """
+    if dim not in ds.coords or ds.sizes[dim] < 2:
+        return None
+    coord = np.asarray(ds.coords[dim].values, dtype="float64")
+    lo = coord[0] - (coord[1] - coord[0]) / 2
+    hi = coord[-1] + (coord[-1] - coord[-2]) / 2
+    return (min(lo, hi), max(lo, hi))
+
+
+def _direction(ds: xr.Dataset, dim: Hashable) -> int:
+    """+1 for increasing, -1 for decreasing, 0 for unknown."""
+    if dim not in ds.coords or ds.sizes[dim] < 2:
+        return 0
+    diffs = np.diff(np.asarray(ds.coords[dim].values))
+    if np.all(diffs > 0):
+        return 1
+    if np.all(diffs < 0):
+        return -1
+    raise ValueError(f"coordinate {dim!r} is not monotonic")
+
+
+def _validate_levels(levels: Mapping[str, xr.Dataset]) -> None:
+    """
+    Enforce the structural invariant. Raises ValueError naming the offending
+    level(s) on failure.
+    """
+    if len(levels) == 0:
+        raise ValueError("a Multiscale requires at least one level")
+
+    names = list(levels)
+    first = levels[names[0]]
+    ref_dims = set(first.dims)
+    ref_vars = set(first.data_vars)
+    ref_coords = set(first.coords)
+
+    for name in names[1:]:
+        ds = levels[name]
+        if set(ds.dims) != ref_dims:
+            raise ValueError(
+                f"level {name!r} has dims {sorted(map(str, ds.dims))}, "
+                f"expected {sorted(map(str, ref_dims))} (from level {names[0]!r})"
+            )
+        if set(ds.data_vars) != ref_vars:
+            raise ValueError(
+                f"level {name!r} has data variables {sorted(map(str, ds.data_vars))}, "
+                f"expected {sorted(map(str, ref_vars))} (from level {names[0]!r})"
+            )
+        if set(ds.coords) != ref_coords:
+            raise ValueError(
+                f"level {name!r} has coordinates {sorted(map(str, ds.coords))}, "
+                f"expected {sorted(map(str, ref_coords))} (from level {names[0]!r})"
+            )
+
+    # monotonicity (raises inside _direction), consistent direction, and
+    # fine -> coarse ordering of spacings
+    for dim in ref_dims:
+        directions = {name: _direction(levels[name], dim) for name in names}
+        known = {n: d for n, d in directions.items() if d != 0}
+        if len(set(known.values())) > 1:
+            raise ValueError(
+                f"coordinate {dim!r} does not have a consistent direction "
+                f"across levels: {known}"
+            )
+
+    prev_name: str | None = None
+    prev_spacing: dict[Hashable, float] = {}
+    for name in names:
+        spacing = _spacings(levels[name])
+        for dim, s in spacing.items():
+            prev = prev_spacing.get(dim)
+            # allow equality: not every dimension is downsampled
+            if prev is not None and s < prev * (1 - 1e-6):
+                raise ValueError(
+                    f"levels are not ordered fine to coarse: spacing of {dim!r} "
+                    f"decreases from {prev} (level {prev_name!r}) to {s} "
+                    f"(level {name!r})"
+                )
+        prev_spacing.update(spacing)
+        prev_name = name
+
+
+class Multiscale(Mapping):
+    """
+    An ordered, named collection of ``xarray.Dataset`` levels sampling one
+    signal on a shared domain, from finest to coarsest.
+
+    ``Multiscale`` is a ``Mapping`` from level name to ``Dataset``: iteration,
+    ``.keys()``, ``.values()``, ``.items()``, and ``ms[name]`` behave like a
+    dict. Integer indexing (``ms[0]``, ``ms[-1]``) selects levels by position.
+    """
+
+    def __init__(self, levels: Mapping[str, xr.Dataset | xr.DataArray]):
+        normalized = {str(k): _as_dataset(v) for k, v in levels.items()}
+        _validate_levels(normalized)
+        self._levels: dict[str, xr.Dataset] = normalized
+
+    # ------------------------------------------------------------------
+    # construction
+    # ------------------------------------------------------------------
+    @classmethod
+    def from_datasets(
+        cls,
+        datasets: Sequence[xr.Dataset | xr.DataArray],
+        names: Sequence[str] | None = None,
+    ) -> Multiscale:
+        """
+        Assemble a Multiscale from an explicit fine-to-coarse sequence of
+        datasets (or data arrays), wherever they came from.
+
+        This is the constructor that IO backends target: any source that can
+        produce a list of per-level datasets can produce a ``Multiscale``.
+        """
+        if names is None:
+            names = [str(i) for i in range(len(datasets))]
+        if len(names) != len(datasets):
+            raise ValueError(
+                f"got {len(datasets)} datasets but {len(names)} names"
+            )
+        return cls(dict(zip(names, datasets)))
+
+    @classmethod
+    def downscale(
+        cls,
+        array: Any,
+        reduction: Callable[..., Any],
+        scale_factors: Sequence[int] | int,
+        **kwargs: Any,
+    ) -> Multiscale:
+        """
+        Derivational constructor: build a pyramid by recursively downsampling
+        ``array`` (an array or DataArray) with ``reduction``. Wraps
+        :func:`xarray_multiscale.multiscale`; coordinates are averaged over
+        windows, preserving domain coverage under cell semantics.
+        """
+        from xarray_multiscale.multiscale import multiscale
+
+        arrays = multiscale(array, reduction, scale_factors, **kwargs)
+        # downscaled levels inherit dask graph names ("downscale-<hash>");
+        # a pyramid is one variable, so every level gets the source's name
+        name = arrays[0].name if arrays[0].name is not None else "data"
+        return cls.from_datasets([a.rename(name) for a in arrays])
+
+    # ------------------------------------------------------------------
+    # Mapping protocol and access
+    # ------------------------------------------------------------------
+    def __len__(self) -> int:
+        return len(self._levels)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._levels)
+
+    def __getitem__(self, key: str | int) -> xr.Dataset:
+        if isinstance(key, int):
+            return self._levels[self.levels[key]]
+        return self._levels[key]
+
+    @property
+    def levels(self) -> tuple[str, ...]:
+        """Level names, ordered fine to coarse."""
+        return tuple(self._levels)
+
+    def level(self, key: str | int) -> xr.Dataset:
+        """Project a single level out of the pyramid, as a plain Dataset."""
+        return self[key]
+
+    @property
+    def finest(self) -> xr.Dataset:
+        return self[0]
+
+    @property
+    def coarsest(self) -> xr.Dataset:
+        return self[-1]
+
+    @property
+    def scales(self) -> dict[str, dict[Hashable, float]]:
+        """Mean coordinate spacing per dimension, for each level."""
+        return {name: _spacings(ds) for name, ds in self.items()}
+
+    def transform(
+        self, level: str | int = 0, precision: int | None = None
+    ) -> dict[str, dict[Hashable, float]]:
+        """
+        The affine map from array indices to world coordinates of one level,
+        derived from its coordinates: ``{"scale": {dim: spacing},
+        "translate": {dim: first coordinate value}}``.
+
+        Only dimensions with a numeric 1-D coordinate of length >= 2 appear in
+        ``scale``; ``translate`` includes any dimension with a coordinate.
+        ``precision`` rounds both, which is usually necessary when the
+        spacing is recovered from float coordinates that were themselves
+        computed (the ``coords[1] - coords[0]`` problem).
+        """
+        ds = self[level]
+        scale = _spacings(ds)
+        translate = {
+            dim: float(np.asarray(ds.coords[dim].values)[0])
+            for dim in ds.dims
+            if dim in ds.coords
+            and ds.sizes[dim] >= 1
+            and np.issubdtype(np.asarray(ds.coords[dim].values).dtype, np.number)
+        }
+        if precision is not None:
+            scale = {k: round(v, precision) for k, v in scale.items()}
+            translate = {k: round(v, precision) for k, v in translate.items()}
+        return {"scale": scale, "translate": translate}
+
+    # ------------------------------------------------------------------
+    # geometry
+    # ------------------------------------------------------------------
+    def is_consistent(self, rtol: float = 1e-3) -> bool:
+        """
+        Advisory check of the geometric invariant: do all levels cover the
+        same domain, under cell semantics? Deviations are measured relative
+        to the finest level's extent per dimension.
+
+        This is deliberately not enforced anywhere: ``::2``-subsampled
+        pyramids and rounded overview shapes fail it slightly and are still
+        useful data.
+        """
+        finest = self.finest
+        for dim in finest.dims:
+            ref = _extent(finest, dim)
+            if ref is None:
+                continue
+            span = ref[1] - ref[0]
+            if span == 0:
+                continue
+            for ds in self.values():
+                ext = _extent(ds, dim)
+                if ext is None:
+                    continue
+                if max(abs(ext[0] - ref[0]), abs(ext[1] - ref[1])) > rtol * span:
+                    return False
+        return True
+
+    # ------------------------------------------------------------------
+    # selection
+    # ------------------------------------------------------------------
+    def sel(
+        self,
+        indexers: Mapping[str, Any] | None = None,
+        *,
+        level: str | int | None = None,
+        resolution: float | Mapping[Hashable, float] | None = None,
+        shape: Mapping[Hashable, int] | None = None,
+        method: str | None = None,
+        tolerance: Any = None,
+        **indexers_kwargs: Any,
+    ) -> Multiscale | xr.Dataset:
+        """
+        Select by world coordinates.
+
+        With only coordinate indexers, the selection is applied at every
+        level (each level using its own coordinates) and a ``Multiscale`` is
+        returned. Passing exactly one of the selector arguments projects a
+        single level instead, returning a plain ``Dataset``:
+
+        - ``level``: that level, selected.
+        - ``resolution``: the coarsest level whose spacing is <= the requested
+          resolution in every constrained dimension. A scalar constrains every
+          dimension whose spacing varies across levels; a mapping constrains
+          exactly its keys. If even the finest level is too coarse, the
+          finest level is returned (best effort).
+        - ``shape``: the coarsest level that still yields at least the
+          requested number of samples in each given dimension *after* the
+          coordinate selection is applied (the viewer/tile use case). If no
+          level is large enough, the finest is returned.
+        """
+        given = [k for k, v in zip(_SELECTORS, (level, resolution, shape)) if v is not None]
+        if len(given) > 1:
+            raise ValueError(
+                f"at most one of {_SELECTORS} may be given, got {given}"
+            )
+
+        indexers = dict(indexers or {}) | dict(indexers_kwargs)
+        sel_kwargs: dict[str, Any] = {}
+        if method is not None:
+            sel_kwargs["method"] = method
+        if tolerance is not None:
+            sel_kwargs["tolerance"] = tolerance
+
+        def _apply(ds: xr.Dataset) -> xr.Dataset:
+            return ds.sel(indexers, **sel_kwargs) if indexers else ds
+
+        if level is not None:
+            return _apply(self[level])
+
+        if resolution is not None:
+            return _apply(self[self._pick_by_resolution(resolution)])
+
+        if shape is not None:
+            selected = {name: _apply(ds) for name, ds in self.items()}
+            for name in reversed(list(selected)):
+                ds = selected[name]
+                if all(ds.sizes.get(dim, 0) >= n for dim, n in shape.items()):
+                    return ds
+            return selected[self.levels[0]]
+
+        return type(self)({name: _apply(ds) for name, ds in self.items()})
+
+    def _pick_by_resolution(self, resolution: float | Mapping[Hashable, float]) -> str:
+        all_spacings = self.scales
+        if isinstance(resolution, Mapping):
+            constraints: dict[Hashable, float] = dict(resolution)
+        else:
+            # a scalar constrains every dimension that is actually multiscale
+            varying = [
+                dim
+                for dim in self.finest.dims
+                if len({s[dim] for s in all_spacings.values() if dim in s}) > 1
+            ]
+            constraints = {dim: float(resolution) for dim in varying}
+        if not constraints:
+            return self.levels[0]
+
+        chosen = self.levels[0]
+        for name in self.levels:
+            spacing = all_spacings[name]
+            # a level with unknowable spacing for a constrained dim is not a candidate
+            if all(
+                dim in spacing and spacing[dim] <= res * (1 + 1e-6)
+                for dim, res in constraints.items()
+            ):
+                chosen = name
+            else:
+                break
+        return chosen
+
+    # ------------------------------------------------------------------
+    # transformation
+    # ------------------------------------------------------------------
+    def map(self, fn: Callable[..., xr.Dataset | xr.DataArray], *args: Any, **kwargs: Any) -> Multiscale:
+        """
+        Apply ``fn`` to every level and re-wrap the results. The structural
+        invariant is re-validated: a function that renames coordinates or
+        drops dimensions inconsistently across levels is an error.
+
+        ``map`` is the closed algebra for geometry-preserving operations. For
+        per-level reductions whose results are not a multiscale variable
+        (histograms, summaries), use the mapping protocol instead::
+
+            {name: fn(ds) for name, ds in ms.items()}
+        """
+        results = {}
+        for name, ds in self.items():
+            try:
+                results[name] = _as_dataset(fn(ds, *args, **kwargs))
+            except Exception as e:
+                raise type(e)(f"map failed on level {name!r}: {e}") from e
+        try:
+            return type(self)(results)
+        except ValueError as e:
+            raise ValueError(
+                f"map produced levels that violate the multiscale invariant: {e}"
+            ) from e
+
+    def _binop(self, other: Any, op: Callable[[Any, Any], Any], reflexive: bool = False):
+        if isinstance(other, Multiscale):
+            return NotImplemented
+        if reflexive:
+            return self.map(lambda ds: op(other, ds))
+        return self.map(lambda ds: op(ds, other))
+
+    def __add__(self, other): return self._binop(other, operator.add)
+    def __radd__(self, other): return self._binop(other, operator.add, reflexive=True)
+    def __sub__(self, other): return self._binop(other, operator.sub)
+    def __rsub__(self, other): return self._binop(other, operator.sub, reflexive=True)
+    def __mul__(self, other): return self._binop(other, operator.mul)
+    def __rmul__(self, other): return self._binop(other, operator.mul, reflexive=True)
+    def __truediv__(self, other): return self._binop(other, operator.truediv)
+    def __rtruediv__(self, other): return self._binop(other, operator.truediv, reflexive=True)
+    def __pow__(self, other): return self._binop(other, operator.pow)
+    def __neg__(self): return self.map(operator.neg)
+
+    # ------------------------------------------------------------------
+    # level management
+    # ------------------------------------------------------------------
+    def add_level(
+        self, dataset: xr.Dataset | xr.DataArray, name: str | None = None
+    ) -> Multiscale:
+        """
+        Return a new Multiscale with ``dataset`` inserted at the position
+        implied by its spacing (the geometric view: any sampling of the
+        domain is a valid level, however it was produced).
+        """
+        ds = _as_dataset(dataset)
+        if name is None:
+            taken = set(self.levels)
+            i = len(self)
+            while str(i) in taken:
+                i += 1
+            name = str(i)
+        if name in self._levels:
+            raise ValueError(f"level {name!r} already exists")
+
+        def _sort_key(item: tuple[str, xr.Dataset]) -> float:
+            spacing = _spacings(item[1])
+            if not spacing:
+                return 0.0
+            return float(np.exp(np.mean(np.log(list(spacing.values())))))
+
+        entries = list(self._levels.items()) + [(name, ds)]
+        entries.sort(key=_sort_key)
+        return type(self)(dict(entries))
+
+    def drop_level(self, key: str | int) -> Multiscale:
+        """Return a new Multiscale without the given level."""
+        name = self.levels[key] if isinstance(key, int) else key
+        if name not in self._levels:
+            raise KeyError(name)
+        if len(self) == 1:
+            raise ValueError("cannot drop the only level of a Multiscale")
+        return type(self)({k: v for k, v in self._levels.items() if k != name})
+
+    # ------------------------------------------------------------------
+    # repr
+    # ------------------------------------------------------------------
+    def __repr__(self) -> str:
+        lines = [f"<xarray_multiscale.Multiscale ({len(self)} levels, fine to coarse)>"]
+        for name, ds in self.items():
+            sizes = ", ".join(f"{d}: {s}" for d, s in ds.sizes.items())
+            spacing = ", ".join(
+                f"{d}: {s:.6g}" for d, s in _spacings(ds).items()
+            )
+            lines.append(f"  {name}: ({sizes})" + (f"  spacing ({spacing})" if spacing else ""))
+        lines.append(f"Data variables: {', '.join(map(str, self.finest.data_vars))}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # zarr IO
+    # ------------------------------------------------------------------
+    def to_zarr(
+        self,
+        store: Any,
+        group: str | None = None,
+        *,
+        name: str | None = None,
+        dialects: Sequence[str] = ("xarray",),
+        encoding: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Write every level to ``store`` and record a manifest in the group
+        attributes.
+
+        The default layout places levels in sibling child groups named after
+        the levels — but that layout is a default, not the convention. The
+        convention is the manifest: ``{"multiscales": [{"name": ...,
+        "levels": [{"path": ...}, ...]}]}`` with paths resolved relative to
+        the node carrying the manifest, so a manifest written by other means
+        may reference levels anywhere in the store.
+
+        ``encoding`` is broadcast over levels: the same per-variable encoding
+        is applied to each level (variable names repeat across levels).
+
+        ``dialects`` controls additional metadata written alongside the
+        native manifest. ``"ome-ngff"`` adds OME-NGFF 0.4 ``multiscales``
+        attributes whose dataset paths point at the arrays inside each level
+        group, with transforms derived from the coordinates.
+        """
+        import zarr
+
+        prefix = group or ""
+        for level_name, ds in self.items():
+            level_encoding = None
+            if encoding is not None:
+                level_encoding = {k: v for k, v in encoding.items() if k in ds.variables}
+            ds.to_zarr(
+                store,
+                group=posixpath.join(prefix, level_name),
+                encoding=level_encoding,
+                **kwargs,
+            )
+
+        manifest: dict[str, Any] = {
+            "name": name,
+            "levels": [{"path": level_name} for level_name in self.levels],
+        }
+        attrs: dict[str, Any] = {MULTISCALES_KEY: [manifest]}
+
+        for dialect in dialects:
+            if dialect == "xarray":
+                continue
+            elif dialect == "ome-ngff":
+                attrs[MULTISCALES_KEY].append(self._ome_manifest(name=name))
+            else:
+                raise ValueError(f"unknown dialect {dialect!r}")
+
+        root = zarr.open_group(store, path=prefix, mode="a")
+        root.attrs.update(attrs)
+
+    def _ome_manifest(self, name: str | None = None) -> dict[str, Any]:
+        data_vars = list(self.finest.data_vars)
+        if len(data_vars) != 1:
+            raise ValueError(
+                "the ome-ngff dialect requires exactly one data variable per "
+                f"level, got {data_vars}"
+            )
+        (var,) = data_vars
+        dims = list(self.finest[var].dims)
+        axes = [
+            {"name": str(d), "type": _OME_AXIS_TYPES.get(str(d).lower(), "space")}
+            for d in dims
+        ]
+        datasets = []
+        for level_name in self.levels:
+            tf = self.transform(level_name)
+            datasets.append(
+                {
+                    "path": posixpath.join(level_name, str(var)),
+                    "coordinateTransformations": [
+                        {"type": "scale", "scale": [tf["scale"].get(d, 1.0) for d in dims]},
+                        {
+                            "type": "translation",
+                            "translation": [tf["translate"].get(d, 0.0) for d in dims],
+                        },
+                    ],
+                }
+            )
+        return {
+            "version": "0.4",
+            "name": name,
+            "axes": axes,
+            "datasets": datasets,
+        }
+
+
+# ----------------------------------------------------------------------
+# reading
+# ----------------------------------------------------------------------
+def _resolve_path(prefix: str, path: str) -> str:
+    resolved = posixpath.normpath(posixpath.join(prefix, path))
+    if resolved.startswith(".."):
+        raise ValueError(
+            f"manifest path {path!r} escapes the store (resolved to {resolved!r})"
+        )
+    return "" if resolved == "." else resolved
+
+
+def open_multiscale(
+    store: Any,
+    group: str | None = None,
+    *,
+    name: str | None = None,
+    **kwargs: Any,
+) -> Multiscale:
+    """
+    Open a multiscale group from a zarr store.
+
+    Recognizes, in order:
+
+    1. The native manifest: ``multiscales`` entries with a ``levels`` list of
+       ``{"path": ...}`` references, resolved relative to ``group``. Each
+       referenced node must be an ordinary xarray-readable zarr group.
+    2. The OME-NGFF dialect: ``multiscales`` entries with ``axes`` and
+       ``datasets`` whose paths reference zarr *arrays*; coordinates are
+       generated from each dataset's scale/translation transforms.
+
+    ``name`` selects among multiple pyramids in one manifest (by their
+    ``name`` field); by default the first entry is used. Extra ``kwargs``
+    are forwarded to ``xarray.open_zarr`` for native-manifest levels.
+    """
+    import zarr
+
+    prefix = group or ""
+    node = zarr.open_group(store, path=prefix, mode="r")
+    entries = node.attrs.get(MULTISCALES_KEY)
+    if not entries:
+        raise ValueError(
+            f"no {MULTISCALES_KEY!r} metadata found"
+            + (f" in group {group!r}" if group else "")
+        )
+
+    if name is not None:
+        entries = [e for e in entries if e.get("name") == name]
+        if not entries:
+            raise ValueError(f"no multiscale named {name!r} found")
+
+    native = [e for e in entries if "levels" in e]
+    ome = [e for e in entries if "datasets" in e and "axes" in e]
+
+    if native:
+        entry = native[0]
+        datasets, names = [], []
+        for i, item in enumerate(entry["levels"]):
+            path = _resolve_path(prefix, item["path"])
+            ds = xr.open_zarr(store, group=path, **kwargs)
+            datasets.append(ds)
+            names.append(str(item.get("name", posixpath.basename(item["path"]) or i)))
+        return Multiscale.from_datasets(datasets, names=names)
+
+    if ome:
+        return _open_ome(store, prefix, ome[0], node)
+
+    raise ValueError(
+        f"found {MULTISCALES_KEY!r} metadata, but no recognizable dialect "
+        "(expected a 'levels' list or OME-NGFF 'axes' + 'datasets')"
+    )
+
+
+def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Multiscale:
+    import dask.array as da
+    import zarr
+
+    dims = [ax["name"] for ax in entry["axes"]]
+    var_name = entry.get("name") or "data"
+    global_tfs = entry.get("coordinateTransformations", [])
+
+    datasets, names = [], []
+    for item in entry["datasets"]:
+        path = _resolve_path(prefix, item["path"])
+        arr = zarr.open_array(store, path=path, mode="r")
+        data = da.from_array(arr, chunks=arr.chunks)
+
+        scale = [1.0] * len(dims)
+        translation = [0.0] * len(dims)
+        for tf in list(item.get("coordinateTransformations", [])) + list(global_tfs):
+            if tf["type"] == "scale":
+                scale = [s * g for s, g in zip(scale, tf["scale"])]
+                translation = [t * g for t, g in zip(translation, tf["scale"])]
+            elif tf["type"] == "translation":
+                translation = [t + g for t, g in zip(translation, tf["translation"])]
+
+        coords = {
+            dim: t + s * np.arange(n, dtype="float64")
+            for dim, s, t, n in zip(dims, scale, translation, data.shape)
+        }
+        datasets.append(
+            xr.DataArray(data, dims=dims, coords=coords, name=var_name).to_dataset()
+        )
+        # OME dataset paths are unique by construction; basenames need not be
+        # (e.g. "0/tas", "1/tas"), so the path itself is the level name
+        names.append(str(item["path"]))
+    return Multiscale.from_datasets(datasets, names=names)
