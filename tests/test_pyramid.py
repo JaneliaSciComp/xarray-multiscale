@@ -393,7 +393,7 @@ def test_ome_dialect_multivar_error(tmp_path):
 pytest.importorskip("xarray.indexes", reason="needs xarray with functional coords")
 from xarray.indexes import CoordinateTransformIndex, RangeIndex  # noqa: E402
 
-from xarray_multiscale.pyramid import _functional_coords  # noqa: E402
+from xarray_multiscale.coordinates import coords_from_specs  # noqa: E402
 
 
 def write_ome_store(path, sizes, scales, translations, n_levels=3, factor=2):
@@ -458,7 +458,7 @@ def test_ome_coords_are_functional(tmp_path):
 def test_exact_scale_beats_differencing():
     """The transform is exact where differencing stored floats is not."""
     n, scale, trans = 256, 0.18, 0.09
-    coords = _functional_coords(["x"], [n], [scale], [trans])
+    coords = coords_from_specs([{"dim": "x", "scale": scale, "translation": trans, "size": n}])
     ds = xr.DataArray(np.zeros(n), dims="x", coords=coords, name="v").to_dataset()
     ms = Multiscale.from_datasets([ds])
 
@@ -471,7 +471,7 @@ def test_exact_scale_beats_differencing():
 def test_functional_coords_are_not_materialized():
     """An axis of any length costs nothing: 1e9 samples, no allocation."""
     n = 1_000_000_000
-    ds = xr.Dataset(coords=_functional_coords(["q"], [n], [2.5], [1.0]))
+    ds = xr.Dataset(coords=coords_from_specs([{"dim": "q", "scale": 2.5, "translation": 1.0, "size": n}]))
     ms = Multiscale.from_datasets([ds])
 
     assert ms.scales["0"]["q"] == 2.5
@@ -512,7 +512,7 @@ def test_sel_mixed_functional_and_explicit_coords():
     ds = xr.Dataset(
         {"v": (("t", "x"), np.zeros((10, n)))},
         coords={"t": np.arange(10.0)},
-    ).assign_coords(_functional_coords(["x"], [n], [0.18], [0.09]))
+    ).assign_coords(coords_from_specs([{"dim": "x", "scale": 0.18, "translation": 0.09, "size": n}]))
     assert isinstance(ds.xindexes["x"], CoordinateTransformIndex)
     assert not isinstance(ds.xindexes["t"], CoordinateTransformIndex)
 
@@ -532,7 +532,7 @@ def test_sel_mixed_functional_and_explicit_coords():
 def test_sel_functional_unsupported_method_error():
     ds = xr.Dataset(
         {"v": ("x", np.zeros(16))},
-        coords=_functional_coords(["x"], [16], [0.5], [0.25]),
+        coords=coords_from_specs([{"dim": "x", "scale": 0.5, "translation": 0.25, "size": 16}]),
     )
     ms = Multiscale.from_datasets([ds])
     with pytest.raises(ValueError, match="only method='nearest'"):
@@ -542,7 +542,7 @@ def test_sel_functional_unsupported_method_error():
 def test_sel_functional_tolerance_error():
     ds = xr.Dataset(
         {"v": ("x", np.zeros(16))},
-        coords=_functional_coords(["x"], [16], [0.5], [0.25]),
+        coords=coords_from_specs([{"dim": "x", "scale": 0.5, "translation": 0.25, "size": 16}]),
     )
     ms = Multiscale.from_datasets([ds])
     with pytest.raises(ValueError, match="tolerance"):
@@ -605,30 +605,59 @@ def test_explicit_coords_stored_as_arrays(tmp_path):
     xr.testing.assert_identical(back["0"].load(), ms["0"])
 
 
-def test_native_dialect_warns_when_materializing_declared_coords(tmp_path):
+def test_native_dialect_roundtrips_both_coordinate_kinds(tmp_path):
     """
-    The native dialect stores coordinates as arrays, which converts a
-    declaration into values. That is a real conversion, so it is warned
-    about rather than done silently.
+    The two serialization paths, in one level: the array coordinate is written
+    as a zarr array, the analytic one as JSON in the manifest. Both come back
+    as they went in.
     """
     n = 64
     ds = xr.Dataset(
         {"v": (("t", "x"), np.zeros((10, n)))},
         coords={"t": np.arange(10.0)},
-    ).assign_coords(_functional_coords(["x"], [n], [0.18], [0.09]))
+    ).assign_coords(
+        coords_from_specs(
+            [{"dim": "x", "scale": 0.18, "translation": 0.09, "size": n}]
+        )
+    )
     ms = Multiscale.from_datasets([ds])
 
     out = str(tmp_path / "mixed.zarr")
-    with pytest.warns(UserWarning, match="ome-ngff"):
-        ms.to_zarr(out)
+    ms.to_zarr(out)
 
-    # values are preserved even though the declaration is not
+    # 't' took the array path; 'x' took the JSON path and is not an array
+    assert sorted(zarr.open_group(out, path="0", mode="r").array_keys()) == ["t", "v"]
+    entry = zarr.open_group(out, mode="r").attrs["multiscales"][0]["levels"][0]
+    assert entry["coordinates"] == {
+        "x": {
+            "transform": "affine",
+            "scale": 0.18,
+            "translation": 0.09,
+            "size": n,
+            "dim": "x",
+        }
+    }
+
     back = open_multiscale(out)
-    assert not isinstance(back["0"].xindexes["x"], CoordinateTransformIndex)
-    assert back.transform(0)["scale"]["x"] == pytest.approx(0.18)
-    np.testing.assert_allclose(
-        back["0"].coords["x"].values, ds.coords["x"].values
-    )
+    assert isinstance(back["0"].xindexes["x"], CoordinateTransformIndex)
+    assert not isinstance(back["0"].xindexes["t"], CoordinateTransformIndex)
+    assert back.transform(0)["scale"]["x"] == 0.18
+    np.testing.assert_array_equal(back["0"].coords["t"].values, np.arange(10.0))
+    assert back.sel(t=slice(2.0, 5.0), x=slice(1.0, 5.0))["0"].sizes == {"t": 4, "x": 22}
+
+
+def test_unknown_declared_transform_error(tmp_path):
+    ms = make_pyramid(n_levels=1)
+    out = str(tmp_path / "bad.zarr")
+    ms.to_zarr(out)
+    root = zarr.open_group(out, mode="a")
+    manifest = root.attrs["multiscales"]
+    manifest[0]["levels"][0]["coordinates"] = {
+        "x": {"transform": "wavelet", "scale": 1.0, "translation": 0.0, "size": 8}
+    }
+    root.attrs["multiscales"] = manifest
+    with pytest.raises(ValueError, match="unknown transform 'wavelet'"):
+        open_multiscale(out)
 
 
 def test_unknown_dialect_error(tmp_path):
@@ -709,3 +738,111 @@ def test_ome_write_regenerates_axes_when_dims_change(tmp_path):
     ms.to_zarr(out, dialect="ome-ngff")
     axes = zarr.open_group(out, mode="r").attrs["multiscales"][0]["axes"]
     assert [a["name"] for a in axes] == ["lat", "lon"]
+
+
+# ----------------------------------------------------------------------
+# the two coordinate serialization paths
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("dialect", ["xarray", "ome-ngff"])
+def test_analytic_coords_roundtrip_exactly(tmp_path, dialect):
+    """
+    An analytic coordinate is a function, and its parameters must survive
+    storage verbatim. Recovering them from generated values instead is lossy:
+    parameterizing by (start, stop, size) and dividing loses the last ulp for
+    a good fraction of real scales, so this sweeps many of them rather than
+    trusting one lucky pair.
+    """
+    rng = np.random.default_rng(1)
+    for trial in range(60):
+        n = int(rng.integers(2, 512))
+        scale = float(rng.uniform(0.01, 5))
+        translation = float(rng.uniform(-3, 3))
+        ds = xr.Dataset(
+            {"v": ("x", np.zeros(n))},
+            coords=coords_from_specs(
+                [{"dim": "x", "scale": scale, "translation": translation, "size": n}]
+            ),
+        )
+        ms = Multiscale.from_datasets([ds])
+        assert ms.scales["0"]["x"] == scale
+        assert ms.transform(0)["translate"]["x"] == translation
+
+        out = str(tmp_path / f"{dialect}-{trial}.zarr")
+        ms.to_zarr(out, dialect=dialect, name="v")
+        back = open_multiscale(out)
+        assert back.transform(0) == ms.transform(0), (
+            f"trial {trial}: scale={scale!r} translation={translation!r} n={n}"
+        )
+
+
+def test_analytic_coord_is_never_written_as_an_array(tmp_path):
+    """
+    The JSON path writes no values at all. A 1e9-sample axis would be 8 GB as
+    an array; here it costs a few numbers in the manifest.
+    """
+    n = 1_000_000_000
+    ds = xr.Dataset(
+        coords=coords_from_specs(
+            [{"dim": "q", "scale": 2.5, "translation": 1.0, "size": n}]
+        )
+    )
+    out = str(tmp_path / "huge.zarr")
+    Multiscale.from_datasets([ds]).to_zarr(out)
+
+    assert sorted(zarr.open_group(out, path="0", mode="r").array_keys()) == []
+    back = open_multiscale(out)
+    assert back.finest.sizes["q"] == n
+    assert back.transform(0) == {"scale": {"q": 2.5}, "translate": {"q": 1.0}}
+    # and it is still a function, not values
+    assert isinstance(back["0"].xindexes["q"], CoordinateTransformIndex)
+    assert not isinstance(back["0"].coords["q"].variable._data, np.ndarray)
+
+
+def test_size_one_analytic_axis_keeps_its_scale(tmp_path):
+    """
+    A single-sample axis has no differences to measure, but an analytic
+    coordinate does not need any: the scale is a parameter. Inventing 1.0
+    would silently discard a real slice thickness.
+    """
+    store = str(tmp_path / "single.zarr")
+    root = zarr.open_group(store, mode="w")
+    root.create_array("0", shape=(1, 64, 64), dtype="uint8", chunks=(1, 16, 16))
+    datasets = [
+        {
+            "path": "0",
+            "coordinateTransformations": [
+                {"type": "scale", "scale": [0.5, 0.18, 0.18]},
+                {"type": "translation", "translation": [0.25, 0.09, 0.09]},
+            ],
+        }
+    ]
+    root.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "name": "img",
+            "axes": [{"name": d, "type": "space"} for d in "zyx"],
+            "datasets": datasets,
+        }
+    ]
+
+    ms = open_multiscale(store)
+    assert ms.transform(0)["scale"] == {"z": 0.5, "y": 0.18, "x": 0.18}
+
+    out = str(tmp_path / "out.zarr")
+    ms.to_zarr(out, dialect="ome-ngff")
+    written = zarr.open_group(out, mode="r").attrs["multiscales"][0]["datasets"]
+    assert written == datasets
+
+
+def test_analytic_transform_survives_striding():
+    """A stride of k multiplies the scale by k, exactly."""
+    ds = xr.Dataset(
+        {"v": ("x", np.zeros(256))},
+        coords=coords_from_specs(
+            [{"dim": "x", "scale": 0.18, "translation": 0.09, "size": 256}]
+        ),
+    )
+    ms = Multiscale.from_datasets([ds]).map(lambda d: d.isel(x=slice(4, 20, 2)))
+    assert ms.scales["0"]["x"] == 0.36
+    assert ms.transform(0)["translate"]["x"] == pytest.approx(0.81)
+    assert isinstance(ms["0"].xindexes["x"], CoordinateTransformIndex)

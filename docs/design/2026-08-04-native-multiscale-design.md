@@ -250,69 +250,78 @@ Properties this buys:
    a manifest whose targets moved is a validation error rather than an
    impossibility.
 
-### Functional coordinates
+### Coordinates: two kinds, two serializations
 
-OME-NGFF does not store coordinates; it *declares* them, as a scale and a
-translation per axis. Xarray's functional coordinates
-(``xarray.indexes.RangeIndex`` over a ``CoordinateTransform``, experimental as
-of xarray 2025.03) express the same thing: the coordinate is a function of the
-array index, evaluated on demand. Reading OME therefore carries the
-declaration straight through rather than evaluating it into arrays.
+A coordinate is one of exactly two kinds, and the kind decides how it is
+stored:
 
-Measured properties of the resulting levels:
+- **array** — a sequence of values, serialized as a zarr array. Any sampling
+  can be written this way, including irregular ones.
+- **analytic** — a function of the array index, serialized as JSON. Only the
+  parameters are stored; there are no values to write.
 
-- **Nothing is allocated.** A 10^9-sample axis is represented for free;
-  probing four positions out of it takes ~0.6 ms. This matters because the
-  geometry the invariant depends on (spacing, extent, direction) must be
-  computable without touching the data.
-- **The declared parameters come back exactly.** ``index.step`` is ``0.18``
-  where differencing the evaluated coordinates gives ``0.18000000000000002``.
-  This removes the reason xarray-ome-ngff needed a ``transform_precision``
-  knob, and makes the OME transform round-trip exact.
+There is no third path, and the two do not convert into one another for free.
+An analytic coordinate cannot be recovered from an array of its values:
+parameters → values → parameters is a *re-derivation* of the function from
+samples of it, and it is lossy. The parameters must therefore stay
+authoritative from end to end.
+
+This is not hypothetical. The first implementation expressed an analytic
+coordinate with xarray's ``RangeIndex.linspace``, which is parameterized by
+``(start, stop, size)`` and derives the step as ``(stop - start) / size``. For
+about 8% of random scales the recovered step differs from the requested one in
+the last ulp — measured end to end, 25 of 300 randomly parameterized OME
+stores failed a byte-exact metadata round trip. The test written to prove
+exactness passed only because 0.18 and 0.36 happen to be exact under that
+division.
+
+The fix is to store what the function *is*: ``Affine`` (in
+``coordinates.py``) holds ``scale`` and ``translation`` as given and computes
+``x(i) = translation + scale * i`` from them. It exposes the
+``start``/``stop``/``step``/``size``/``slice`` surface that
+:class:`xarray.indexes.RangeIndex` duck-types on, so it inherits that index's
+slice-aware selection without depending on xarray's non-public
+``RangeCoordinateTransform``. Striding is exact too: a stride of *k*
+multiplies the scale by *k* rather than re-deriving it from new endpoints.
+After the change the same 300-store sweep round-trips 300/300, in both
+dialects.
+
+Measured properties of an analytic coordinate:
+
+- **Nothing is allocated.** A 10^9-sample axis is free to represent and costs
+  a few numbers in the manifest instead of 8 GB of array; probing four
+  positions out of one takes ~0.6 ms. The geometry the invariant depends on
+  (spacing, extent, direction) is computed without touching data.
+- **The scale is known at any length.** A single-sample axis has no
+  differences to measure, but an analytic coordinate does not need any — the
+  scale is a parameter. An earlier version gated on size ≥ 2 and silently
+  wrote ``scale: 1.0`` for a size-1 axis, discarding real slice thickness.
 - **The index survives** arithmetic, ``astype``, ``chunk``, ``sel`` and
-  ``isel`` with slices, so a level stays functional through ``map`` and
-  through selection.
+  ``isel``, so a level stays analytic through ``map`` and through selection.
 
-Consequences for the geometry helpers: spacing is read from the transform
-where present, and otherwise derived from the two endpoint values (which
-telescopes to the mean of the differences, so it is both exact and cheap);
-extent needs only four probed positions; and a functional coordinate is
-monotonic by construction, so its direction is the sign of its step rather
-than a scan.
-
-Two frictions in the underlying API that the abstraction absorbs:
+Two frictions in the underlying xarray API that the abstraction absorbs:
 
 1. **Selection method.** A transform-backed index accepts only
    ``method="nearest"`` — including for slices — while a pandas index
    *rejects* ``method`` when the indexer is a slice. A level with both kinds
-   of coordinate (functional x/y/z, explicit channel or time) therefore
+   of coordinate (analytic x/y/z, an explicit channel or time axis) therefore
    cannot be selected in a single ``sel`` call at all. ``Multiscale.sel``
-   splits the indexers by index type and applies each group appropriately,
-   so ``ms.sel(t=slice(...), x=slice(...))`` works regardless of how each
-   coordinate is represented.
-2. **Index-dropping assembly.** Both ``Coordinates.merge`` and item-assignment
-   (``coords[name] = var``) silently discard the index, yielding coordinates
-   that look right and are no longer functional. Multi-axis coordinates must
-   be built by passing variables and indexes together to the ``Coordinates``
-   constructor.
+   splits the indexers by kind and applies each appropriately.
+2. **Index-dropping assembly.** Both ``Coordinates.merge`` and item assignment
+   silently discard the index, yielding coordinates that look right and are no
+   longer analytic. Variables and indexes must be handed to the
+   ``Coordinates`` constructor together.
 
-**Writing.** A functional coordinate has no values to store — it *is* its
-parameters — so writing it as an array discards the declaration and reads
-back as explicit values. Preserving it therefore requires a storage
-convention that can express a declared coordinate.
-
-OME-NGFF already is one: ``coordinateTransformations`` says exactly what a
-functional coordinate says. Inventing a second, parallel declaration in the
-native manifest would mean two conventions describing the same thing, with
-nothing to say which is authoritative — so we do not. Round-trip fidelity is
-a property of the **dialect** instead: whichever dialect can read a
-representation is expected to write it back. See "Dialects" below.
-
-The native dialect stores coordinates as arrays, which is right for explicit
-coordinates (they *are* values) and lossy for declared ones. Because that
-conversion is real — and for a large axis it also writes an array that did
-not previously exist — the native writer warns rather than doing it
-silently, and points at the dialect that can preserve the declaration.
+**Where each path is written.** The native dialect uses both: array
+coordinates become zarr arrays in the level group, analytic ones become a
+``"coordinates"`` object in that level's manifest entry, holding
+``{"transform": "affine", "scale", "translation", "size", "dim"}`` —
+information-equivalent to an OME-NGFF scale plus translation, deliberately, so
+that neither convention says anything the other cannot. OME-NGFF is
+JSON-only: it declares coordinates with ``coordinateTransformations`` and
+stores no coordinate arrays anywhere, so it can carry analytic coordinates
+and cannot represent irregular ones at all — the writer says so rather than
+approximating.
 
 ### Dialects
 

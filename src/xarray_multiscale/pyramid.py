@@ -27,14 +27,13 @@ from typing import Any, Callable
 import numpy as np
 import xarray as xr
 
-try:  # functional coordinates, xarray >= 2025.03
-    from xarray.indexes import CoordinateTransformIndex, RangeIndex
-
-    HAS_FUNCTIONAL_COORDS = True
-except ImportError:  # pragma: no cover - depends on the installed xarray
-    CoordinateTransformIndex = ()  # type: ignore[assignment]
-    RangeIndex = None  # type: ignore[assignment]
-    HAS_FUNCTIONAL_COORDS = False
+from xarray_multiscale.coordinates import (
+    HAS_ANALYTIC_COORDS,
+    analytic_transform,
+    coords_from_specs,
+)
+from xarray_multiscale.coordinates import from_json as _coords_from_json
+from xarray_multiscale.coordinates import to_json as _coord_to_json
 
 __all__ = ["Multiscale", "open_multiscale"]
 
@@ -64,17 +63,11 @@ def _as_dataset(obj: xr.Dataset | xr.DataArray) -> xr.Dataset:
 
 def _transform_index(ds: xr.Dataset, dim: Hashable) -> Any:
     """
-    The functional (transform-backed) index for ``dim``, or None if the
-    coordinate is stored as explicit values.
-
-    A functional coordinate is *declared* — by a scale and translation, as in
-    OME-NGFF — rather than materialized. Its values are computed on demand,
-    so the exact sampling parameters are available without touching an array.
+    The analytic transform backing ``dim``, or None if the coordinate is an
+    array of values. See :mod:`xarray_multiscale.coordinates` for the two
+    kinds and how each is stored.
     """
-    if not HAS_FUNCTIONAL_COORDS:
-        return None
-    idx = ds.xindexes.get(dim)
-    return idx if isinstance(idx, CoordinateTransformIndex) else None
+    return analytic_transform(ds, dim)
 
 
 def _usable_coord(ds: xr.Dataset, dim: Hashable) -> bool:
@@ -108,15 +101,18 @@ def _spacings(ds: xr.Dataset) -> dict[Hashable, float]:
     """
     out: dict[Hashable, float] = {}
     for dim in ds.dims:
+        transform = _transform_index(ds, dim)
+        if transform is not None:
+            # the scale is a parameter of the function, so it is known even
+            # for a single-sample axis, where differencing has nothing to work
+            # with. A size-1 z axis with a real slice thickness is ordinary in
+            # OME-NGFF and its scale must not be invented.
+            out[dim] = abs(transform.scale)
+            continue
         if not _usable_coord(ds, dim) or ds.sizes[dim] < 2:
             continue
-        idx = _transform_index(ds, dim)
-        step = getattr(idx, "step", None)
-        if step is not None:
-            out[dim] = abs(float(step))
-        else:
-            first, last = _probe(ds, dim, [0, -1])
-            out[dim] = abs(last - first) / (ds.sizes[dim] - 1)
+        first, last = _probe(ds, dim, [0, -1])
+        out[dim] = abs(last - first) / (ds.sizes[dim] - 1)
     return out
 
 
@@ -145,9 +141,9 @@ def _direction(ds: xr.Dataset, dim: Hashable) -> int:
     """
     if not _usable_coord(ds, dim) or ds.sizes[dim] < 2:
         return 0
-    step = getattr(_transform_index(ds, dim), "step", None)
-    if step is not None:
-        return 1 if step > 0 else -1
+    transform = _transform_index(ds, dim)
+    if transform is not None:
+        return 1 if transform.scale > 0 else -1
     diffs = np.diff(np.asarray(ds.coords[dim].values))
     if np.all(diffs > 0):
         return 1
@@ -423,9 +419,11 @@ class Multiscale(Mapping):
         for dim in ds.dims:
             if not _usable_coord(ds, dim):
                 continue
-            start = getattr(_transform_index(ds, dim), "start", None)
+            transform = _transform_index(ds, dim)
             translate[dim] = (
-                float(start) if start is not None else float(_probe(ds, dim, [0])[0])
+                transform.translation
+                if transform is not None
+                else float(_probe(ds, dim, [0])[0])
             )
         if precision is not None:
             scale = {k: round(v, precision) for k, v in scale.items()}
@@ -761,6 +759,8 @@ def open_multiscale(
         for i, item in enumerate(entry["levels"]):
             path = _resolve_path(prefix, item["path"])
             ds = xr.open_zarr(store, group=path, **kwargs)
+            if item.get("coordinates"):
+                ds = ds.assign_coords(_coords_from_json(item["coordinates"]))
             datasets.append(ds)
             names.append(str(item.get("name", posixpath.basename(item["path"]) or i)))
         return Multiscale.from_datasets(datasets, names=names)
@@ -772,52 +772,6 @@ def open_multiscale(
         f"found {MULTISCALES_KEY!r} metadata, but no recognizable dialect "
         "(expected a 'levels' list or OME-NGFF 'axes' + 'datasets')"
     )
-
-
-def _functional_coords(
-    dims: Sequence[str],
-    shape: Sequence[int],
-    scale: Sequence[float],
-    translation: Sequence[float],
-) -> xr.Coordinates | dict[Hashable, Any]:
-    """
-    Build coordinates for one level from its affine parameters.
-
-    OME-NGFF declares coordinates as a function of the array index — a scale
-    and a translation per axis — rather than storing them. Xarray's functional
-    coordinates express exactly that, so the declaration is carried straight
-    through instead of being evaluated into arrays: the values are computed on
-    demand, the transform parameters stay exact and recoverable, and an axis
-    of any length costs nothing to represent.
-
-    Falls back to materialized coordinates when the installed xarray predates
-    functional coordinates.
-    """
-    if not HAS_FUNCTIONAL_COORDS:
-        return {
-            dim: t + s * np.arange(n, dtype="float64")
-            for dim, s, t, n in zip(dims, scale, translation, shape)
-        }
-
-    variables: dict[Hashable, Any] = {}
-    indexes: dict[Hashable, Any] = {}
-    for dim, s, t, n in zip(dims, scale, translation, shape):
-        if n < 1 or s == 0:
-            # a degenerate axis has no transform to speak of
-            variables[dim] = xr.Variable(
-                (dim,), t + s * np.arange(n, dtype="float64")
-            )
-            continue
-        # endpoint=False fixes the sample count at exactly n, which arange
-        # cannot guarantee for a stop derived by float arithmetic
-        index = RangeIndex.linspace(t, t + n * s, n, endpoint=False, dim=dim)
-        coord = xr.Coordinates.from_xindex(index)
-        # note: merging Coordinates objects, or assigning their variables one
-        # at a time, silently drops the indexes -- they must be carried
-        # alongside the variables explicitly
-        variables.update(coord.variables)
-        indexes.update(coord.xindexes)
-    return xr.Coordinates(coords=variables, indexes=indexes)
 
 
 def _write_native(
@@ -832,49 +786,40 @@ def _write_native(
     Write each level as an ordinary xarray zarr dataset, plus a manifest
     referencing them by path.
 
-    Coordinates are stored as arrays. A functional coordinate has no values
-    of its own — it *is* its parameters — so storing it here discards the
-    declaration and reads back as explicit values. That is a real conversion,
-    not a detail, and for a large axis it also writes an array that did not
-    previously exist, so it is warned about rather than done silently. The
-    lossless route for declared coordinates is a dialect that can express
-    them, such as ``"ome-ngff"``.
+    Each coordinate takes whichever of the two serialization paths its kind
+    calls for: an array coordinate is written as a zarr array inside the level
+    group, an analytic one as JSON in that level's manifest entry. An analytic
+    coordinate is never evaluated into an array, because recovering the
+    function from samples of it is lossy.
     """
     import zarr
 
-    declared = sorted(
-        {
-            str(coord)
-            for ds in ms.values()
-            for coord in ds.coords
-            if _transform_index(ds, coord) is not None
-        }
-    )
-    if declared:
-        warnings.warn(
-            f"coordinates {declared} are functional (declared by a transform) "
-            "and the 'xarray' dialect stores coordinates as arrays, so they "
-            "will be materialized and read back as explicit values. Write "
-            "with dialect='ome-ngff' to preserve the declaration.",
-            UserWarning,
-            stacklevel=3,
-        )
-
+    levels_manifest: list[dict[str, Any]] = []
     for level_name, ds in ms.items():
+        declared: dict[str, Any] = {}
+        for coord in ds.coords:
+            spec = _coord_to_json(ds, coord)
+            if spec is not None:
+                declared[str(coord)] = spec
+        to_write = ds.drop_vars(list(declared)) if declared else ds
+
         level_encoding = None
         if encoding is not None:
-            level_encoding = {k: v for k, v in encoding.items() if k in ds.variables}
-        ds.to_zarr(
+            level_encoding = {
+                k: v for k, v in encoding.items() if k in to_write.variables
+            }
+        to_write.to_zarr(
             store,
             group=posixpath.join(prefix, level_name),
             encoding=level_encoding,
             **kwargs,
         )
+        entry: dict[str, Any] = {"path": level_name}
+        if declared:
+            entry["coordinates"] = declared
+        levels_manifest.append(entry)
 
-    manifest = {
-        "name": name,
-        "levels": [{"path": level_name} for level_name in ms.levels],
-    }
+    manifest = {"name": name, "levels": levels_manifest}
     root = zarr.open_group(store, path=prefix, mode="a")
     root.attrs.update({MULTISCALES_KEY: [manifest]})
 
@@ -1010,7 +955,12 @@ def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Mult
             elif tf["type"] == "translation":
                 translation = [t + g for t, g in zip(translation, tf["translation"])]
 
-        coords = _functional_coords(dims, data.shape, scale, translation)
+        coords = coords_from_specs(
+            [
+                {"dim": d, "scale": sc, "translation": tr, "size": n}
+                for d, sc, tr, n in zip(dims, scale, translation, data.shape)
+            ]
+        )
         datasets.append(
             xr.DataArray(data, dims=dims, coords=coords, name=var_name).to_dataset()
         )
