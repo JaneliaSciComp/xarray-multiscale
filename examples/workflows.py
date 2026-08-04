@@ -113,11 +113,9 @@ img = xr.DataArray(
 )
 ome_store = f"{tmp}/nuclei.zarr"
 Multiscale.downscale(img, windowed_mean, (1, 2, 2), depth=2).to_zarr(
-    ome_store, name="nuclei", dialects=("xarray", "ome-ngff"), mode="w"
+    ome_store, name="nuclei", dialect="ome-ngff"
 )
-# strip to OME-only metadata to prove the dialect stands alone
-g = zarr.open_group(ome_store, mode="a")
-g.attrs["multiscales"] = [g.attrs["multiscales"][1]]
+print("store contains only arrays:", sorted(zarr.open_group(ome_store, mode="r").array_keys()))
 
 ms = open_multiscale(ome_store)
 print(ms)
@@ -130,7 +128,7 @@ from xarray.indexes import CoordinateTransformIndex  # noqa: E402
 x = ms.finest.coords["x"]
 print("\nx coord is functional:", isinstance(ms.finest.xindexes["x"], CoordinateTransformIndex))
 print("  materialized?       ", isinstance(x.variable._data, np.ndarray))
-print("  exact scale         ", ms.scales["0/nuclei"]["x"])
+print("  exact scale         ", ms.scales[ms.levels[0]]["x"])
 print("  vs differencing     ", float(np.diff(x.values[:2])[0]), "<- the drift this avoids")
 
 # physical selection: one z-plane in microns, at a target resolution.
@@ -141,5 +139,12 @@ print("\n~0.5um plane shape:", dict(plane.sizes))
 # viewer handoff (was: scale=[float(d[1]-d[0]) for d in dims] by hand)
 print("napari kwargs:", ms.transform(0))
 # e.g. viewer.add_image([lvl.nuclei.data for lvl in ms.values()], ...)
+
+# and the dialect round-trips: read OME, write OME, metadata unchanged
+again = f"{tmp}/again.zarr"
+ms.to_zarr(again, dialect="ome-ngff")
+before = zarr.open_group(ome_store, mode="r").attrs["multiscales"]
+after = zarr.open_group(again, mode="r").attrs["multiscales"]
+print("OME round-trip identical:", before == after)
 
 print("\nall three workflows: one abstraction, no per-level loops, no magic keys")

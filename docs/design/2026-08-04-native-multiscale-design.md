@@ -215,6 +215,7 @@ references levels by path.
         {"path": "derived/s1"},
         {"path": "s2"}
       ]
+
     }
   ]
 }
@@ -295,31 +296,65 @@ Two frictions in the underlying API that the abstraction absorbs:
    be built by passing variables and indexes together to the ``Coordinates``
    constructor.
 
-Not yet resolved: writing. ``to_zarr`` materializes functional coordinates
-into stored arrays, and reopening through the native manifest yields
-``PandasIndex`` coordinates — so a pyramid round-tripped through the native
-convention is no longer functional, even though the OME dialect it emits
-alongside carries the exact transforms. Options are to record the transform
-in the manifest itself, or to omit functionally-declared coordinate arrays on
-write and reconstruct them on read; the latter also produces cleaner
-OME-compatible groups (real OME stores contain only data arrays).
+**Writing.** A functional coordinate has no values to store — it *is* its
+parameters — so writing it as an array discards the declaration and reads
+back as explicit values. Preserving it therefore requires a storage
+convention that can express a declared coordinate.
+
+OME-NGFF already is one: ``coordinateTransformations`` says exactly what a
+functional coordinate says. Inventing a second, parallel declaration in the
+native manifest would mean two conventions describing the same thing, with
+nothing to say which is authoritative — so we do not. Round-trip fidelity is
+a property of the **dialect** instead: whichever dialect can read a
+representation is expected to write it back. See "Dialects" below.
+
+The native dialect stores coordinates as arrays, which is right for explicit
+coordinates (they *are* values) and lossy for declared ones. Because that
+conversion is real — and for a large axis it also writes an array that did
+not previously exist — the native writer warns rather than doing it
+silently, and points at the dialect that can preserve the declaration.
 
 ### Dialects
 
-Other multiscale conventions map onto the manifest rather than being special
-cases of a layout:
+A dialect is a storage convention the pyramid can be read from and written
+to. It owns its layout and its metadata completely, and its contract is
+round-trip: reading a store and writing it back reproduces it, including
+metadata the reader did not itself derive.
 
-- **OME-NGFF** is a read/write dialect. Its `multiscales.datasets[].path` *is*
-  a manifest (with an implicit children-only restriction we drop). Reading:
-  `coordinateTransformations` (scale/translation) become functional
-  coordinates (see above), so OME stores without explicit coordinate arrays
-  get world-coordinate `sel()` with nothing materialized. Writing:
-  `ms.to_zarr(store, dialects=("xarray", "ome-ngff"))` emits OME attrs
-  alongside, computed by `ms.transform(level)`, giving napari/viv interop
-  without xarray adopting OME's model wholesale.
-- **Consumer-specific metadata** (e.g. carbonplan maps' `pixels_per_tile`,
-  its `y`/`x` naming requirements) belongs in dialects, not in xarray's
-  manifest. Producer code stops absorbing per-consumer conventions.
+Writing therefore names *one* dialect (`ms.to_zarr(store,
+dialect="ome-ngff")`), never a set. Emitting several metadata flavours over
+one layout invites them to disagree with no way to resolve which is
+authoritative — and it was how an earlier draft ended up inventing a
+coordinate declaration that duplicated OME's.
+
+Nothing requires the core library to own every dialect. The OME dialect in
+particular is a self-contained reader/writer pair over a documented interface
+(`Multiscale.from_datasets` in, `Multiscale.attrs` + `transform()` out), so it
+could equally live in a package that already specializes in that format, such
+as xarray-ome-ngff.
+
+The dialects, concretely:
+
+- **The native convention** (`dialect="xarray"`): levels as ordinary xarray
+  zarr datasets, plus the path-referencing manifest described above.
+  Coordinates are stored as arrays. This is the general case — multi-variable
+  levels, irregular coordinates, levels scattered across a store — and the
+  only one of the two that can express them.
+- **OME-NGFF** (`dialect="ome-ngff"`): its `multiscales.datasets[].path` *is*
+  a manifest (with an implicit children-only restriction we drop), so it needs
+  no native manifest alongside. Reading: `coordinateTransformations` become
+  functional coordinates, so a store with no coordinate arrays gets
+  world-coordinate `sel()` with nothing materialized. Writing: level arrays
+  and OME metadata only, with transforms from `ms.transform(level)` — exact,
+  because the coordinates are declared. Source axis metadata (types, units,
+  version, name) is preserved through `Multiscale.attrs["ome"]` so that
+  read-then-write does not silently drop it; if the dimensions have since been
+  renamed, the stale axes are re-derived rather than reused. Requires a single
+  data variable and uniform spacing, and says so rather than writing something
+  subtly wrong.
+- **Consumer-specific conventions** (e.g. carbonplan maps' `pixels_per_tile`
+  and `y`/`x` naming) are dialects too, rather than something producer code
+  absorbs by hand.
 
 ## Motivation: three real examples, before and after
 
@@ -527,17 +562,13 @@ Every row is the same missing object.
    usually dask); invariant re-validation must be metadata-only.
 3. **Arithmetic dunders.** How much of the Dataset API to forward through
    `map` (binary ops between two `Multiscale`s with different level sets?).
-4. **Native-manifest round-trip of functional coordinates.** Writing
-   materializes them and reading back through the native manifest yields
-   explicit coordinates; see the "Functional coordinates" section for the two
-   candidate fixes.
-5. **Where it incubates.** `xarray.experimental`, or an external package
+4. **Where it incubates.** `xarray.experimental`, or an external package
    targeting upstreaming (the DataTree path). This repo (xarray-multiscale)
    is a natural incubator for the object + manifest, with the `coarsen`
    constructor it already implements.
-6. **DataTree coupling.** Subclass vs wrapper; how much of DataTree's public
+5. **DataTree coupling.** Subclass vs wrapper; how much of DataTree's public
    surface leaks through (and whether future DataTree semantics changes
    ripple in).
-7. **Manifest schema details.** Versioning, multiple pyramids per manifest,
+6. **Manifest schema details.** Versioning, multiple pyramids per manifest,
    naming, relationship to zarr conventions work and to OME-NGFF's
    collections/bioformats2raw layouts.

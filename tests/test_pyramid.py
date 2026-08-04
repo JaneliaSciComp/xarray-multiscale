@@ -355,37 +355,36 @@ def test_open_no_manifest_error(tmp_path):
         open_multiscale(store)
 
 
-def test_ome_ngff_dialect_roundtrip(tmp_path):
+def test_ome_ngff_dialect_write(tmp_path):
+    """Writing OME-NGFF produces OME-NGFF: arrays plus OME's own manifest."""
     ms = make_pyramid(n_levels=2, dims=("y", "x"))
     store = str(tmp_path / "ome.zarr")
-    ms.to_zarr(store, name="tas", dialects=("xarray", "ome-ngff"))
+    ms.to_zarr(store, name="tas", dialect="ome-ngff")
 
-    attrs = zarr.open_group(store, mode="r").attrs.asdict()
-    native, ome = attrs["multiscales"]
+    root = zarr.open_group(store, mode="r")
+    (ome,) = root.attrs["multiscales"]
     assert ome["version"] == "0.4"
+    assert ome["name"] == "tas"
     assert [ax["name"] for ax in ome["axes"]] == ["y", "x"]
-    assert ome["datasets"][0]["path"] == "0/tas"
+    # datasets point at arrays, and no coordinate arrays are written
+    assert [d["path"] for d in ome["datasets"]] == ["0", "1"]
+    assert sorted(root.array_keys()) == ["0", "1"]
     assert ome["datasets"][1]["coordinateTransformations"][0] == {
         "type": "scale",
         "scale": [2.0, 2.0],
     }
 
-    # a store carrying ONLY OME metadata opens via transform-generated coords
-    root = zarr.open_group(store, mode="a")
-    root.attrs["multiscales"] = [ome]
     back = open_multiscale(store)
-    assert back.levels == ("0/tas", "1/tas")
+    assert back.levels == ("0", "1")
     assert list(back.finest.data_vars) == ["tas"]
     for name, orig_name in zip(back.levels, ms.levels):
-        xr.testing.assert_allclose(
-            back[name]["tas"].load(), ms[orig_name]["tas"]
-        )
+        xr.testing.assert_allclose(back[name]["tas"].load(), ms[orig_name]["tas"])
 
 
 def test_ome_dialect_multivar_error(tmp_path):
     ms = make_pyramid(n_levels=2, extra_var=True)
-    with pytest.raises(ValueError, match="exactly one data variable"):
-        ms.to_zarr(str(tmp_path / "x.zarr"), dialects=("xarray", "ome-ngff"))
+    with pytest.raises(ValueError, match="single array per level"):
+        ms.to_zarr(str(tmp_path / "x.zarr"), dialect="ome-ngff")
 
 
 # ----------------------------------------------------------------------
@@ -550,23 +549,163 @@ def test_sel_functional_tolerance_error():
         ms.sel(x=1.0, tolerance=0.1)
 
 
-def test_ome_transform_roundtrip_is_exact(tmp_path):
-    """OME transforms -> functional coords -> OME transforms, unchanged."""
-    scales = {"z": 0.5, "y": 0.18, "x": 0.18}
-    translations = {"z": 0.25, "y": 0.09, "x": 0.09}
+def test_ome_dialect_roundtrips_functional_coords(tmp_path):
+    """
+    Reading OME-Zarr and writing it back must preserve the coordinates as
+    declarations. OME already has a manifest -- coordinateTransformations --
+    and it says exactly what a functional coordinate says, so the round trip
+    goes through OME's own metadata rather than a parallel schema.
+    """
     store = write_ome_store(
         str(tmp_path / "in.zarr"),
-        sizes={"z": 8, "y": 64, "x": 64},
-        scales=scales,
-        translations=translations,
+        sizes={"z": 64, "y": 256, "x": 256},
+        scales={"z": 0.5, "y": 0.18, "x": 0.18},
+        translations={"z": 0.25, "y": 0.09, "x": 0.09},
+    )
+    original = open_multiscale(store)
+
+    out = str(tmp_path / "out.zarr")
+    original.to_zarr(out, dialect="ome-ngff")
+    back = open_multiscale(out)
+
+    assert back.levels == original.levels
+    for name in original.levels:
+        for dim in ("z", "y", "x"):
+            assert isinstance(back[name].xindexes[dim], CoordinateTransformIndex)
+            assert not isinstance(back[name].coords[dim].variable._data, np.ndarray)
+        # the declared parameters are identical, not merely close
+        assert back.transform(name) == original.transform(name)
+        assert back.scales[name] == original.scales[name]
+        xr.testing.assert_allclose(back[name]["nuclei"].load(),
+                                   original[name]["nuclei"].load())
+
+    # the store is OME-Zarr: level arrays, no coordinate arrays, OME manifest
+    written = zarr.open_group(out, mode="r")
+    assert sorted(written.array_keys()) == ["0", "1", "2"]
+    assert list(written.group_keys()) == []
+    source = zarr.open_group(store, mode="r").attrs["multiscales"][0]
+    assert written.attrs["multiscales"][0]["datasets"] == source["datasets"]
+    assert written.attrs["multiscales"][0]["axes"] == source["axes"]
+
+
+def test_explicit_coords_stored_as_arrays(tmp_path):
+    """Explicit coordinates are values, so the native dialect writes them."""
+    ms = make_pyramid(n_levels=2)
+    out = str(tmp_path / "explicit.zarr")
+    ms.to_zarr(out)
+
+    manifest = zarr.open_group(out, mode="r").attrs["multiscales"][0]
+    assert manifest["levels"] == [{"path": "0"}, {"path": "1"}]
+    assert sorted(zarr.open_group(out, path="0", mode="r").array_keys()) == [
+        "tas",
+        "x",
+        "y",
+    ]
+    back = open_multiscale(out)
+    xr.testing.assert_identical(back["0"].load(), ms["0"])
+
+
+def test_native_dialect_warns_when_materializing_declared_coords(tmp_path):
+    """
+    The native dialect stores coordinates as arrays, which converts a
+    declaration into values. That is a real conversion, so it is warned
+    about rather than done silently.
+    """
+    n = 64
+    ds = xr.Dataset(
+        {"v": (("t", "x"), np.zeros((10, n)))},
+        coords={"t": np.arange(10.0)},
+    ).assign_coords(_functional_coords(["x"], [n], [0.18], [0.09]))
+    ms = Multiscale.from_datasets([ds])
+
+    out = str(tmp_path / "mixed.zarr")
+    with pytest.warns(UserWarning, match="ome-ngff"):
+        ms.to_zarr(out)
+
+    # values are preserved even though the declaration is not
+    back = open_multiscale(out)
+    assert not isinstance(back["0"].xindexes["x"], CoordinateTransformIndex)
+    assert back.transform(0)["scale"]["x"] == pytest.approx(0.18)
+    np.testing.assert_allclose(
+        back["0"].coords["x"].values, ds.coords["x"].values
+    )
+
+
+def test_unknown_dialect_error(tmp_path):
+    ms = make_pyramid(n_levels=1)
+    with pytest.raises(ValueError, match="unknown dialect"):
+        ms.to_zarr(str(tmp_path / "bad.zarr"), dialect="geotiff")
+
+
+def test_ome_dialect_nonuniform_coords_error(tmp_path):
+    ds = xr.Dataset(
+        {"v": ("x", np.zeros(5))}, coords={"x": [0.0, 1.0, 4.0, 9.0, 16.0]}
+    )
+    ms = Multiscale.from_datasets([ds])
+    with pytest.raises(ValueError, match="not uniformly spaced"):
+        ms.to_zarr(str(tmp_path / "nonuniform.zarr"), dialect="ome-ngff")
+
+
+def test_ome_roundtrip_preserves_source_metadata(tmp_path):
+    """
+    A reader that can read OME-Zarr must be able to write it again without
+    quietly dropping what it did not itself derive: axis units and types,
+    the spec version, the name.
+    """
+    store = str(tmp_path / "in.zarr")
+    root = zarr.open_group(store, mode="w")
+    for i, size in enumerate((64, 32)):
+        root.create_array(f"s{i}", shape=(size, size), dtype="uint8", chunks=(16, 16))
+    root.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "name": "membrane",
+            "axes": [
+                {"name": "y", "type": "space", "unit": "micrometer"},
+                {"name": "x", "type": "space", "unit": "micrometer"},
+            ],
+            "datasets": [
+                {
+                    "path": "s0",
+                    "coordinateTransformations": [
+                        {"type": "scale", "scale": [0.18, 0.18]},
+                        {"type": "translation", "translation": [0.09, 0.09]},
+                    ],
+                },
+                {
+                    "path": "s1",
+                    "coordinateTransformations": [
+                        {"type": "scale", "scale": [0.36, 0.36]},
+                        {"type": "translation", "translation": [0.18, 0.18]},
+                    ],
+                },
+            ],
+        }
+    ]
+    source = zarr.open_group(store, mode="r").attrs["multiscales"][0]
+
+    ms = open_multiscale(store)
+    out = str(tmp_path / "out.zarr")
+    ms.to_zarr(out, dialect="ome-ngff")
+
+    assert zarr.open_group(out, mode="r").attrs["multiscales"][0] == source
+
+
+def test_ome_write_regenerates_axes_when_dims_change(tmp_path):
+    """
+    Preserved metadata must not outlive its subject: renaming a dimension
+    invalidates the source axes, so they are re-derived rather than reused.
+    """
+    store = write_ome_store(
+        str(tmp_path / "in.zarr"),
+        sizes={"y": 64, "x": 64},
+        scales={"y": 0.5, "x": 0.5},
+        translations={"y": 0.25, "x": 0.25},
         n_levels=2,
     )
-    ms = open_multiscale(store)
-    emitted = ms._ome_manifest(name="nuclei")
+    ms = open_multiscale(store).map(lambda ds: ds.rename({"y": "lat", "x": "lon"}))
 
-    original = zarr.open_group(store, mode="r").attrs["multiscales"][0]["datasets"]
-    for orig, new in zip(original, emitted["datasets"]):
-        o_scale, o_trans = orig["coordinateTransformations"]
-        n_scale, n_trans = new["coordinateTransformations"]
-        assert n_scale["scale"] == o_scale["scale"]
-        assert n_trans["translation"] == o_trans["translation"]
+    out = str(tmp_path / "out.zarr")
+    ms.to_zarr(out, dialect="ome-ngff")
+    axes = zarr.open_group(out, mode="r").attrs["multiscales"][0]["axes"]
+    assert [a["name"] for a in axes] == ["lat", "lon"]

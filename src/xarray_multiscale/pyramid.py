@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import operator
 import posixpath
+import warnings
 from collections.abc import Hashable, Iterator, Mapping, Sequence
 from typing import Any, Callable
 
@@ -155,6 +156,26 @@ def _direction(ds: xr.Dataset, dim: Hashable) -> int:
     raise ValueError(f"coordinate {dim!r} is not monotonic")
 
 
+def _is_uniform(ds: xr.Dataset, dim: Hashable, rtol: float = 1e-6) -> bool:
+    """
+    Whether ``dim`` is sampled at a constant interval, and so can be described
+    by a scale and a translation.
+
+    A functional coordinate is uniform by construction. An explicit one has to
+    be checked against its values, which is affordable here because those
+    values are already stored as an array.
+    """
+    if _transform_index(ds, dim) is not None:
+        return True
+    if not _usable_coord(ds, dim) or ds.sizes[dim] < 3:
+        return True
+    diffs = np.diff(np.asarray(ds.coords[dim].values, dtype="float64"))
+    mean = diffs.mean()
+    if mean == 0:
+        return bool(np.all(diffs == 0))
+    return bool(np.max(np.abs(diffs - mean)) <= abs(mean) * rtol)
+
+
 def _sel_dataset(
     ds: xr.Dataset,
     indexers: Mapping[Hashable, Any],
@@ -284,10 +305,18 @@ class Multiscale(Mapping):
     dict. Integer indexing (``ms[0]``, ``ms[-1]``) selects levels by position.
     """
 
-    def __init__(self, levels: Mapping[str, xr.Dataset | xr.DataArray]):
+    def __init__(
+        self,
+        levels: Mapping[str, xr.Dataset | xr.DataArray],
+        attrs: Mapping[str, Any] | None = None,
+    ):
         normalized = {str(k): _as_dataset(v) for k, v in levels.items()}
         _validate_levels(normalized)
         self._levels: dict[str, xr.Dataset] = normalized
+        # pyramid-level metadata. A dialect stores what it read here (under
+        # its own key) so that it can write the same thing back out; see
+        # `to_zarr`.
+        self.attrs: dict[str, Any] = dict(attrs or {})
 
     # ------------------------------------------------------------------
     # construction
@@ -490,7 +519,7 @@ class Multiscale(Mapping):
                     return ds
             return selected[self.levels[0]]
 
-        return type(self)({name: _apply(ds) for name, ds in self.items()})
+        return type(self)({name: _apply(ds) for name, ds in self.items()}, attrs=self.attrs)
 
     def _pick_by_resolution(self, resolution: float | Mapping[Hashable, float]) -> str:
         all_spacings = self.scales
@@ -542,7 +571,7 @@ class Multiscale(Mapping):
             except Exception as e:
                 raise type(e)(f"map failed on level {name!r}: {e}") from e
         try:
-            return type(self)(results)
+            return type(self)(results, attrs=self.attrs)
         except ValueError as e:
             raise ValueError(
                 f"map produced levels that violate the multiscale invariant: {e}"
@@ -595,7 +624,7 @@ class Multiscale(Mapping):
 
         entries = list(self._levels.items()) + [(name, ds)]
         entries.sort(key=_sort_key)
-        return type(self)(dict(entries))
+        return type(self)(dict(entries), attrs=self.attrs)
 
     def drop_level(self, key: str | int) -> Multiscale:
         """Return a new Multiscale without the given level."""
@@ -604,7 +633,9 @@ class Multiscale(Mapping):
             raise KeyError(name)
         if len(self) == 1:
             raise ValueError("cannot drop the only level of a Multiscale")
-        return type(self)({k: v for k, v in self._levels.items() if k != name})
+        return type(self)(
+            {k: v for k, v in self._levels.items() if k != name}, attrs=self.attrs
+        )
 
     # ------------------------------------------------------------------
     # repr
@@ -629,94 +660,45 @@ class Multiscale(Mapping):
         group: str | None = None,
         *,
         name: str | None = None,
-        dialects: Sequence[str] = ("xarray",),
+        dialect: str = "xarray",
         encoding: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
-        Write every level to ``store`` and record a manifest in the group
-        attributes.
+        Write the pyramid to ``store`` in one of the supported dialects.
 
-        The default layout places levels in sibling child groups named after
-        the levels — but that layout is a default, not the convention. The
-        convention is the manifest: ``{"multiscales": [{"name": ...,
-        "levels": [{"path": ...}, ...]}]}`` with paths resolved relative to
-        the node carrying the manifest, so a manifest written by other means
-        may reference levels anywhere in the store.
+        A dialect fully owns the layout and metadata it produces, and is
+        expected to read back what it wrote: ``open_multiscale`` on the result
+        returns an equivalent ``Multiscale``. Writing is therefore *one*
+        dialect, not a pile of metadata flavours over a shared layout — two
+        conventions describing the same pyramid can disagree, and there is no
+        way to say which one is authoritative.
 
-        ``encoding`` is broadcast over levels: the same per-variable encoding
-        is applied to each level (variable names repeat across levels).
+        ``"xarray"`` (the default) writes the native convention: each level as
+        an ordinary xarray zarr dataset, plus a manifest in the group
+        attributes that references the levels by path::
 
-        ``dialects`` controls additional metadata written alongside the
-        native manifest. ``"ome-ngff"`` adds OME-NGFF 0.4 ``multiscales``
-        attributes whose dataset paths point at the arrays inside each level
-        group, with transforms derived from the coordinates.
+            {"multiscales": [{"name": ..., "levels": [{"path": ...}, ...]}]}
+
+        Paths resolve relative to the node carrying the manifest, so a
+        manifest written by other means may reference levels anywhere in the
+        store; the sibling-child-group layout this produces is a default, not
+        the convention. ``encoding`` is broadcast over levels (variable names
+        repeat across levels).
+
+        ``"ome-ngff"`` writes OME-NGFF 0.4, whose own ``multiscales``
+        metadata is the manifest. Coordinates are not stored as arrays: OME
+        declares them with ``coordinateTransformations``, which is exactly
+        what a functional coordinate is, so the declaration round-trips
+        through the store rather than being materialized. Requires a single
+        data variable and uniformly spaced coordinates.
         """
-        import zarr
-
-        prefix = group or ""
-        for level_name, ds in self.items():
-            level_encoding = None
-            if encoding is not None:
-                level_encoding = {k: v for k, v in encoding.items() if k in ds.variables}
-            ds.to_zarr(
-                store,
-                group=posixpath.join(prefix, level_name),
-                encoding=level_encoding,
-                **kwargs,
-            )
-
-        manifest: dict[str, Any] = {
-            "name": name,
-            "levels": [{"path": level_name} for level_name in self.levels],
-        }
-        attrs: dict[str, Any] = {MULTISCALES_KEY: [manifest]}
-
-        for dialect in dialects:
-            if dialect == "xarray":
-                continue
-            elif dialect == "ome-ngff":
-                attrs[MULTISCALES_KEY].append(self._ome_manifest(name=name))
-            else:
-                raise ValueError(f"unknown dialect {dialect!r}")
-
-        root = zarr.open_group(store, path=prefix, mode="a")
-        root.attrs.update(attrs)
-
-    def _ome_manifest(self, name: str | None = None) -> dict[str, Any]:
-        data_vars = list(self.finest.data_vars)
-        if len(data_vars) != 1:
+        writer = _WRITERS.get(dialect)
+        if writer is None:
             raise ValueError(
-                "the ome-ngff dialect requires exactly one data variable per "
-                f"level, got {data_vars}"
+                f"unknown dialect {dialect!r}, expected one of {sorted(_WRITERS)}"
             )
-        (var,) = data_vars
-        dims = list(self.finest[var].dims)
-        axes = [
-            {"name": str(d), "type": _OME_AXIS_TYPES.get(str(d).lower(), "space")}
-            for d in dims
-        ]
-        datasets = []
-        for level_name in self.levels:
-            tf = self.transform(level_name)
-            datasets.append(
-                {
-                    "path": posixpath.join(level_name, str(var)),
-                    "coordinateTransformations": [
-                        {"type": "scale", "scale": [tf["scale"].get(d, 1.0) for d in dims]},
-                        {
-                            "type": "translation",
-                            "translation": [tf["translate"].get(d, 0.0) for d in dims],
-                        },
-                    ],
-                }
-            )
-        return {
-            "version": "0.4",
-            "name": name,
-            "axes": axes,
-            "datasets": datasets,
-        }
+        writer(self, store, group or "", name=name, encoding=encoding, **kwargs)
 
 
 # ----------------------------------------------------------------------
@@ -838,6 +820,173 @@ def _functional_coords(
     return xr.Coordinates(coords=variables, indexes=indexes)
 
 
+def _write_native(
+    ms: Multiscale,
+    store: Any,
+    prefix: str,
+    name: str | None = None,
+    encoding: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> None:
+    """
+    Write each level as an ordinary xarray zarr dataset, plus a manifest
+    referencing them by path.
+
+    Coordinates are stored as arrays. A functional coordinate has no values
+    of its own — it *is* its parameters — so storing it here discards the
+    declaration and reads back as explicit values. That is a real conversion,
+    not a detail, and for a large axis it also writes an array that did not
+    previously exist, so it is warned about rather than done silently. The
+    lossless route for declared coordinates is a dialect that can express
+    them, such as ``"ome-ngff"``.
+    """
+    import zarr
+
+    declared = sorted(
+        {
+            str(coord)
+            for ds in ms.values()
+            for coord in ds.coords
+            if _transform_index(ds, coord) is not None
+        }
+    )
+    if declared:
+        warnings.warn(
+            f"coordinates {declared} are functional (declared by a transform) "
+            "and the 'xarray' dialect stores coordinates as arrays, so they "
+            "will be materialized and read back as explicit values. Write "
+            "with dialect='ome-ngff' to preserve the declaration.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    for level_name, ds in ms.items():
+        level_encoding = None
+        if encoding is not None:
+            level_encoding = {k: v for k, v in encoding.items() if k in ds.variables}
+        ds.to_zarr(
+            store,
+            group=posixpath.join(prefix, level_name),
+            encoding=level_encoding,
+            **kwargs,
+        )
+
+    manifest = {
+        "name": name,
+        "levels": [{"path": level_name} for level_name in ms.levels],
+    }
+    root = zarr.open_group(store, path=prefix, mode="a")
+    root.attrs.update({MULTISCALES_KEY: [manifest]})
+
+
+def _write_ome(
+    ms: Multiscale,
+    store: Any,
+    prefix: str,
+    name: str | None = None,
+    encoding: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> None:
+    """
+    Write OME-NGFF 0.4, whose ``multiscales`` metadata is its own manifest.
+
+    Coordinates are written as ``coordinateTransformations``, not as arrays:
+    that is how OME declares them, and it is the same declaration a
+    functional coordinate carries, so reading the result back reproduces the
+    coordinates exactly. Axis metadata that came from a store originally
+    (types, units) is preserved via ``Multiscale.attrs['ome']`` so that
+    reading and re-writing does not quietly drop it.
+    """
+    import dask.array as da
+    import zarr
+
+    data_vars = list(ms.finest.data_vars)
+    if len(data_vars) != 1:
+        raise ValueError(
+            "the ome-ngff dialect describes a single array per level, but the "
+            f"levels have data variables {data_vars}"
+        )
+    (var,) = data_vars
+    dims = [str(d) for d in ms.finest[var].dims]
+
+    for level_name, ds in ms.items():
+        bad = [
+            d
+            for d in dims
+            if ds.sizes[d] > 1
+            and (d not in _spacings(ds) or not _is_uniform(ds, d))
+        ]
+        if bad:
+            raise ValueError(
+                f"level {level_name!r} is not uniformly spaced along {bad}; "
+                "ome-ngff declares coordinates as a scale and a translation, "
+                "which cannot describe irregular sampling"
+            )
+
+    source = dict(ms.attrs.get("ome") or {})
+    axes = source.get("axes")
+    if not axes or [str(a.get("name")) for a in axes] != dims:
+        # no source metadata, or the dimensions have changed since it was read
+        axes = [
+            {"name": d, "type": _OME_AXIS_TYPES.get(d.lower(), "space")} for d in dims
+        ]
+
+    root = zarr.open_group(store, path=prefix, mode="a")
+    datasets = []
+    for level_name in ms.levels:
+        array = ms[level_name][var]
+        data = array.data
+        chunks = getattr(data, "chunksize", None) or data.shape
+        target = root.create_array(
+            level_name,
+            shape=data.shape,
+            dtype=data.dtype,
+            chunks=chunks,
+            overwrite=True,
+            **(dict(encoding) if encoding else {}),
+        )
+        if isinstance(data, da.Array):
+            da.store(data, target, lock=False)
+        else:
+            target[:] = np.asarray(data)
+
+        transform = ms.transform(level_name)
+        datasets.append(
+            {
+                "path": level_name,
+                "coordinateTransformations": [
+                    {
+                        "type": "scale",
+                        "scale": [transform["scale"].get(d, 1.0) for d in dims],
+                    },
+                    {
+                        "type": "translation",
+                        "translation": [
+                            transform["translate"].get(d, 0.0) for d in dims
+                        ],
+                    },
+                ],
+            }
+        )
+
+    entry = {
+        **source,
+        "version": source.get("version", "0.4"),
+        "axes": axes,
+        "datasets": datasets,
+    }
+    resolved_name = name if name is not None else source.get("name")
+    if resolved_name is not None:
+        entry["name"] = resolved_name
+    root.attrs[MULTISCALES_KEY] = [entry]
+
+
+_WRITERS: dict[str, Callable[..., None]] = {
+    "xarray": _write_native,
+    "ome-ngff": _write_ome,
+}
+
+
 def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Multiscale:
     import dask.array as da
     import zarr
@@ -868,4 +1017,8 @@ def _open_ome(store: Any, prefix: str, entry: dict[str, Any], node: Any) -> Mult
         # OME dataset paths are unique by construction; basenames need not be
         # (e.g. "0/tas", "1/tas"), so the path itself is the level name
         names.append(str(item["path"]))
-    return Multiscale.from_datasets(datasets, names=names)
+    result = Multiscale.from_datasets(datasets, names=names)
+    # keep the source metadata so that writing ome-ngff back out reproduces
+    # the axis types, units and version rather than re-deriving them
+    result.attrs["ome"] = dict(entry)
+    return result
